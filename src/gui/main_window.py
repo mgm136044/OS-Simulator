@@ -7,7 +7,9 @@ from gui.process_input import ProcessInputPanel
 from gui.result_table import ResultTable
 from gui.gantt_chart import GanttChart
 from gui.comparison_view import ComparisonView
+from gui.ready_queue_view import ReadyQueueView
 from models.process import Process
+from models.processor import Processor, CoreType
 from engine.simulator import Simulator
 from schedulers.fcfs import FCFSScheduler
 from schedulers.rr import RRScheduler
@@ -25,6 +27,13 @@ SCHEDULER_MAP = {
     "HRRN": lambda q: HRRNScheduler(),
     "Thanos": lambda q: ThanosScheduler(time_quantum=q),
 }
+
+
+def _make_processors(core_tuples):
+    return [
+        Processor(cid, CoreType.P_CORE if ctype == "P" else CoreType.E_CORE)
+        for cid, ctype in core_tuples
+    ]
 
 
 class MainWindow(QMainWindow):
@@ -53,7 +62,7 @@ class MainWindow(QMainWindow):
         left_scroll.setWidget(left_panel)
         splitter.addWidget(left_scroll)
 
-        # 우측: Gantt + 결과 + 비교
+        # 우측
         right_scroll = QScrollArea()
         right_scroll.setWidgetResizable(True)
         right_widget = QWidget()
@@ -66,6 +75,10 @@ class MainWindow(QMainWindow):
         self.gantt_chart = GanttChart()
         gantt_layout.addWidget(self.gantt_chart)
         right_layout.addWidget(gantt_group, stretch=2)
+
+        # Ready Queue
+        self.ready_queue_view = ReadyQueueView()
+        right_layout.addWidget(self.ready_queue_view)
 
         # 결과 테이블
         result_group = QGroupBox("스케줄링 결과")
@@ -81,24 +94,26 @@ class MainWindow(QMainWindow):
 
         right_scroll.setWidget(right_widget)
         splitter.addWidget(right_scroll)
-        splitter.setSizes([300, 900])
+        splitter.setSizes([350, 850])
 
-    def _on_run(self, algo_name: str, quantum: int, proc_tuples: list):
+    def _on_run(self, algo_name: str, quantum: int, proc_tuples: list, core_tuples: list):
         processes = [Process(pid, at, bt) for pid, at, bt in proc_tuples]
+        processors = _make_processors(core_tuples)
         scheduler = SCHEDULER_MAP[algo_name](quantum)
-        report = self.simulator.run(scheduler, processes)
+        report = self.simulator.run(scheduler, processes, processors)
 
         process_ids = [p["pid"] for p in report["processes"]]
         self.gantt_chart.set_data(report["timeline"], report["total_time"], process_ids)
         self.result_table.update_results(report)
         self.comparison_view.setVisible(False)
 
-    def _on_compare(self, quantum: int, proc_tuples: list):
+    def _on_compare(self, quantum: int, proc_tuples: list, core_tuples: list):
         reports = []
         for algo_name in ProcessInputPanel.ALGORITHMS:
             processes = [Process(pid, at, bt) for pid, at, bt in proc_tuples]
+            processors = _make_processors(core_tuples)
             scheduler = SCHEDULER_MAP[algo_name](quantum)
-            report = self.simulator.run(scheduler, processes)
+            report = self.simulator.run(scheduler, processes, processors)
             reports.append(report)
 
         self.comparison_view.set_results(reports)

@@ -1,16 +1,18 @@
+import random
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QSpinBox, QComboBox, QPushButton, QTableWidget,
     QTableWidgetItem, QHeaderView, QMessageBox,
 )
 from PyQt5.QtCore import pyqtSignal, Qt
+from gui.processor_config import ProcessorConfigPanel
 
 
 class ProcessInputPanel(QWidget):
-    """프로세스 추가/삭제 + 알고리즘 선택 + 실행 버튼"""
+    """프로세스 추가/삭제 + 알고리즘 선택 + 프로세서 설정 + 실행 버튼"""
 
-    run_requested = pyqtSignal(str, int, list)  # (algorithm, quantum, [(pid, at, bt)])
-    compare_requested = pyqtSignal(int, list)  # (quantum, [(pid, at, bt)])
+    run_requested = pyqtSignal(str, int, list, list)  # (algorithm, quantum, [(pid,at,bt)], [(core_id,type)])
+    compare_requested = pyqtSignal(int, list, list)   # (quantum, [(pid,at,bt)], [(core_id,type)])
 
     ALGORITHMS = ["FCFS", "RR", "SPN", "SRTN", "HRRN", "Thanos"]
 
@@ -18,6 +20,10 @@ class ProcessInputPanel(QWidget):
         super().__init__()
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
+
+        # 프로세서 설정
+        self.processor_config = ProcessorConfigPanel()
+        layout.addWidget(self.processor_config)
 
         # 알고리즘 선택
         algo_layout = QHBoxLayout()
@@ -27,7 +33,7 @@ class ProcessInputPanel(QWidget):
         algo_layout.addWidget(self.algo_combo)
         layout.addLayout(algo_layout)
 
-        # Time Quantum (RR, Thanos용)
+        # Time Quantum
         quantum_layout = QHBoxLayout()
         quantum_layout.addWidget(QLabel("Time Quantum:"))
         self.quantum_spin = QSpinBox()
@@ -55,6 +61,10 @@ class ProcessInputPanel(QWidget):
         self.add_btn = QPushButton("추가")
         self.add_btn.clicked.connect(self._add_process)
         input_layout.addWidget(self.add_btn)
+
+        self.random_btn = QPushButton("무작위")
+        self.random_btn.clicked.connect(self._add_random_process)
+        input_layout.addWidget(self.random_btn)
         layout.addLayout(input_layout)
 
         # 프로세스 테이블
@@ -114,6 +124,14 @@ class ProcessInputPanel(QWidget):
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             self.table.setItem(row, col, item)
 
+    def _add_random_process(self):
+        if self.table.rowCount() >= 15:
+            QMessageBox.warning(self, "경고", "프로세스는 최대 15개까지 추가할 수 있습니다.")
+            return
+        self.at_spin.setValue(random.randint(0, 20))
+        self.bt_spin.setValue(random.randint(1, 15))
+        self._add_process()
+
     def _delete_selected(self):
         rows = sorted(set(idx.row() for idx in self.table.selectedIndexes()), reverse=True)
         for row in rows:
@@ -132,17 +150,27 @@ class ProcessInputPanel(QWidget):
             procs.append((pid, at, bt))
         return procs
 
-    def _on_run(self):
+    def _validate(self):
         if self.table.rowCount() == 0:
             QMessageBox.warning(self, "경고", "프로세스를 1개 이상 추가하세요.")
+            return False
+        cores = self.processor_config.get_active_cores()
+        if not cores:
+            QMessageBox.warning(self, "경고", "활성화된 코어가 없습니다.")
+            return False
+        return True
+
+    def _on_run(self):
+        if not self._validate():
             return
         algo = self.algo_combo.currentText()
         quantum = self.quantum_spin.value()
-        self.run_requested.emit(algo, quantum, self._get_proc_tuples())
+        cores = self.processor_config.get_active_cores()
+        self.run_requested.emit(algo, quantum, self._get_proc_tuples(), cores)
 
     def _on_compare(self):
-        if self.table.rowCount() == 0:
-            QMessageBox.warning(self, "경고", "프로세스를 1개 이상 추가하세요.")
+        if not self._validate():
             return
         quantum = self.quantum_spin.value()
-        self.compare_requested.emit(quantum, self._get_proc_tuples())
+        cores = self.processor_config.get_active_cores()
+        self.compare_requested.emit(quantum, self._get_proc_tuples(), cores)

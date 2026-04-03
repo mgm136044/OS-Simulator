@@ -18,6 +18,7 @@ class ScheduleResult:
     timeline: list[TimeSlot] = field(default_factory=list)
     total_time: int = 0
     total_power: float = 0.0
+    queue_snapshots: dict = field(default_factory=dict)  # {time: [pid, ...]}
 
 
 class BaseScheduler(ABC):

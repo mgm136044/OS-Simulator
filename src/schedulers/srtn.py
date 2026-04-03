@@ -1,4 +1,6 @@
+import math
 from models.process import Process
+from models.processor import Processor, CoreType
 from schedulers.base import BaseScheduler, ScheduleResult, TimeSlot
 
 
@@ -12,57 +14,92 @@ class SRTNScheduler(BaseScheduler):
         for p in processes:
             p.reset()
 
+        if processors is None:
+            processors = [Processor(core_id=0, core_type=CoreType.E_CORE)]
+        for core in processors:
+            core.reset()
+
+        sorted_procs = sorted(processes, key=lambda p: (p.arrival_time, p.pid))
         timeline: list[TimeSlot] = []
+        ready_queue: list[Process] = []
         current_time = 0
+        idx = 0
+        n = len(sorted_procs)
+        num_cores = len(processors)
         completed = 0
-        n = len(processes)
-        current_proc = None
-        current_start = 0
+        total_power = 0.0
+
+        core_state: list[dict | None] = [None] * num_cores
+
+        while idx < n and sorted_procs[idx].arrival_time <= current_time:
+            ready_queue.append(sorted_procs[idx])
+            idx += 1
 
         while completed < n:
-            # 도착한 프로세스 중 remaining이 가장 작은 것
-            available = [
-                p for p in processes
-                if p.arrival_time <= current_time and p.remaining_time > 0
-            ]
+            # 도착 처리
+            while idx < n and sorted_procs[idx].arrival_time <= current_time:
+                ready_queue.append(sorted_procs[idx])
+                idx += 1
 
-            if not available:
-                # idle: 다음 도착까지 점프
-                future = [p for p in processes if p.remaining_time > 0]
-                next_arrival = min(p.arrival_time for p in future)
-                if current_proc is not None:
-                    timeline.append(TimeSlot(current_proc.pid, current_start, current_time))
-                    current_proc = None
-                timeline.append(TimeSlot("idle", current_time, next_arrival))
-                current_time = next_arrival
-                continue
+            # 선점 체크: ready_queue에 현재 코어의 프로세스보다 짧은 것이 있으면 교체
+            for ci in range(num_cores):
+                state = core_state[ci]
+                if state is not None and ready_queue:
+                    proc = state["process"]
+                    shortest = min(ready_queue, key=lambda p: (p.remaining_time, p.arrival_time))
+                    if shortest.remaining_time < proc.remaining_time:
+                        # 선점
+                        timeline.append(TimeSlot(proc.pid, state["started_at"], current_time, processors[ci].core_id))
+                        ready_queue.append(proc)
+                        processors[ci].release()
+                        core_state[ci] = None
 
-            best = min(available, key=lambda p: (p.remaining_time, p.arrival_time))
+            # 빈 코어에 할당 (remaining 가장 짧은 것)
+            for ci in range(num_cores):
+                if core_state[ci] is None and ready_queue:
+                    ready_queue.sort(key=lambda p: (p.remaining_time, p.arrival_time))
+                    proc = ready_queue.pop(0)
+                    core_state[ci] = {"process": proc, "started_at": current_time}
+                    processors[ci].assign(proc.pid)
 
-            if current_proc != best:
-                # 프로세스 전환 (선점 또는 새 시작)
-                if current_proc is not None and current_start < current_time:
-                    timeline.append(TimeSlot(current_proc.pid, current_start, current_time))
-                current_proc = best
-                current_start = current_time
+            # 모든 코어 idle → 다음 도착까지 점프
+            if all(s is None for s in core_state):
+                if idx < n:
+                    current_time = sorted_procs[idx].arrival_time
+                    continue
+                else:
+                    break
 
-            # 다음 이벤트 시점 계산 (새 프로세스 도착 또는 현재 프로세스 완료)
-            next_event = current_time + best.remaining_time
-            for p in processes:
-                if p.arrival_time > current_time and p.remaining_time > 0:
-                    if p.arrival_time < next_event:
-                        next_event = p.arrival_time
+            # 1 tick 실행
+            for ci in range(num_cores):
+                state = core_state[ci]
+                if state is None:
+                    processors[ci].tick()
+                    continue
+                proc = state["process"]
+                core = processors[ci]
+                work = min(core.work_per_tick, proc.remaining_time)
+                proc.remaining_time -= work
+                total_power += core.tick()
 
-            elapsed = next_event - current_time
-            best.remaining_time -= elapsed
-            current_time = next_event
+            current_time += 1
 
-            if best.remaining_time == 0:
-                best.completion_time = current_time
-                best.turnaround_time = current_time - best.arrival_time
-                best.waiting_time = best.turnaround_time - best.burst_time
-                completed += 1
-                timeline.append(TimeSlot(best.pid, current_start, current_time))
-                current_proc = None
+            # 완료 처리
+            for ci in range(num_cores):
+                state = core_state[ci]
+                if state is None:
+                    continue
+                proc = state["process"]
+                if proc.remaining_time <= 0:
+                    proc.remaining_time = 0
+                    proc.completion_time = current_time
+                    proc.turnaround_time = current_time - proc.arrival_time
+                    proc.waiting_time = proc.turnaround_time - proc.burst_time
+                    timeline.append(TimeSlot(proc.pid, state["started_at"], current_time, processors[ci].core_id))
+                    processors[ci].release()
+                    core_state[ci] = None
+                    completed += 1
 
-        return ScheduleResult(timeline=timeline, total_time=current_time)
+        total_time = current_time
+        timeline.sort(key=lambda s: (s.core_id, s.start))
+        return ScheduleResult(timeline=timeline, total_time=total_time, total_power=round(total_power, 2))

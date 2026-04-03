@@ -1,4 +1,7 @@
+import math
+from collections import deque
 from models.process import Process
+from models.processor import Processor, CoreType
 from schedulers.base import BaseScheduler, ScheduleResult, TimeSlot
 
 
@@ -12,23 +15,43 @@ class FCFSScheduler(BaseScheduler):
         for p in processes:
             p.reset()
 
-        sorted_procs = sorted(processes, key=lambda p: (p.arrival_time, p.pid))
+        if processors is None:
+            processors = [Processor(core_id=0, core_type=CoreType.E_CORE)]
+        for core in processors:
+            core.reset()
+
+        sorted_procs = deque(sorted(processes, key=lambda p: (p.arrival_time, p.pid)))
         timeline: list[TimeSlot] = []
-        current_time = 0
+        num_cores = len(processors)
+
+        # 각 코어가 비는 시각
+        core_free_at = [0] * num_cores
+        total_power = 0.0
 
         for proc in sorted_procs:
-            if current_time < proc.arrival_time:
-                timeline.append(TimeSlot("idle", current_time, proc.arrival_time))
-                current_time = proc.arrival_time
+            # 가장 먼저 비는 코어 (동률이면 core_id 낮은 것)
+            best_idx = min(range(num_cores),
+                          key=lambda i: (max(core_free_at[i], proc.arrival_time), i))
+            core = processors[best_idx]
+            start = max(core_free_at[best_idx], proc.arrival_time)
+            exec_ticks = math.ceil(proc.burst_time / core.work_per_tick)
+            end = start + exec_ticks
 
-            start = current_time
-            end = start + proc.burst_time
-            timeline.append(TimeSlot(proc.pid, start, end))
+            timeline.append(TimeSlot(proc.pid, start, end, core.core_id))
 
+            # 전력: idle gap이 있으면 시동전력 발생
+            has_idle_gap = core_free_at[best_idx] < start or core_free_at[best_idx] == 0
+            if has_idle_gap:
+                total_power += core.startup_power
+            total_power += exec_ticks * core.power_per_tick
+
+            core_free_at[best_idx] = end
             proc.completion_time = end
             proc.turnaround_time = end - proc.arrival_time
-            proc.waiting_time = proc.turnaround_time - proc.burst_time
+            proc.waiting_time = start - proc.arrival_time
             proc.remaining_time = 0
-            current_time = end
 
-        return ScheduleResult(timeline=timeline, total_time=current_time)
+        total_time = max(core_free_at) if core_free_at else 0
+        timeline.sort(key=lambda s: (s.core_id, s.start))
+
+        return ScheduleResult(timeline=timeline, total_time=total_time, total_power=round(total_power, 2))

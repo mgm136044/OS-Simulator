@@ -105,6 +105,13 @@ class MainWindow(QMainWindow):
         process_ids = [p["pid"] for p in report["processes"]]
         self.gantt_chart.set_data(report["timeline"], report["total_time"], process_ids)
         self.result_table.update_results(report)
+
+        # ReadyQueueView 연결: queue_snapshots + 색상맵
+        self._queue_snapshots = report.get("queue_snapshots", {})
+        self.ready_queue_view.set_color_map(self.gantt_chart.canvas.color_map)
+        # 애니메이션 tick과 연동
+        self.gantt_chart.timer.timeout.connect(self._update_ready_queue)
+        self._update_ready_queue()
         self.comparison_view.setVisible(False)
 
     def _on_compare(self, quantum: int, proc_tuples: list, core_tuples: list):
@@ -118,3 +125,16 @@ class MainWindow(QMainWindow):
 
         self.comparison_view.set_results(reports)
         self.comparison_view.setVisible(True)
+
+    def _update_ready_queue(self):
+        """GanttChart의 현재 애니메이션 시각에 맞춰 ReadyQueueView 갱신"""
+        t = self.gantt_chart.canvas.animated_time
+        snapshots = getattr(self, '_queue_snapshots', {})
+        # 현재 시각 이하의 가장 가까운 snapshot
+        pids = []
+        for st in sorted(snapshots.keys()):
+            if st <= t:
+                pids = snapshots[st]
+            else:
+                break
+        self.ready_queue_view.update_queue(pids)

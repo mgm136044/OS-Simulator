@@ -47,4 +47,5 @@ class Simulator:
                 "avg_ntt": round(avg_ntt, 2),
             },
             "power": power_summary,
+            "queue_snapshots": result.queue_snapshots,
         }

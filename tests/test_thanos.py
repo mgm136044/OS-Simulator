@@ -15,21 +15,37 @@ def make_processes():
 
 
 def test_thanos_metrics():
+    """Tick-based single E-core with arrivals-before-requeue + boost"""
     procs = make_processes()
     scheduler = ThanosScheduler(time_quantum=2)
     scheduler.schedule(procs)
 
-    # WT: P1=0, P2=4, P3=2, P4=5
-    assert procs[0].waiting_time == 0
-    assert procs[1].waiting_time == 4
-    assert procs[2].waiting_time == 2
-    assert procs[3].waiting_time == 5
+    # Tick-based trace (E core, work_per_tick=1):
+    # t=0-2: P1 runs, rem=1. quantum done. Arrivals: P2(AT=1). Boost: 1<=1.5 → appendleft
+    #   Queue after: [P1(boosted), P2(5)]
+    # t=2-3: P1 runs, rem=0. Done. CT=3, TT=3, WT=0. Arrivals: P3(AT=3).
+    #   Queue: [P2(5), P3(2)]
+    # t=3-5: P2 runs 2 ticks, rem=3. quantum done. Arrivals: J4(AT=5). No boost.
+    #   Queue: [P3(2), P4(4), P2(3)]
+    # t=5-7: P3 runs 2 ticks, rem=0. Done. CT=7, TT=4, WT=2.
+    #   Queue: [P4(4), P2(3)]
+    # t=7-9: P4 runs 2 ticks, rem=2. quantum done. No arrivals. Boost: 2<=2 → appendleft
+    #   Queue: [P4(boosted,2), P2(3)]
+    # t=9-11: P4 runs 2 ticks, rem=0. Done. CT=11, TT=6, WT=2.
+    #   Queue: [P2(3)]
+    # t=11-13: P2 runs 2 ticks, rem=1. quantum done. Boost: 1<=2.5 → appendleft
+    #   Queue: [P2(boosted,1)]
+    # t=13-14: P2 runs 1 tick, rem=0. Done. CT=14, TT=13, WT=8.
 
-    # TT: P1=3, P2=9, P3=4, P4=9
-    assert procs[0].turnaround_time == 3
-    assert procs[1].turnaround_time == 9
-    assert procs[2].turnaround_time == 4
-    assert procs[3].turnaround_time == 9
+    assert procs[0].waiting_time == 0    # P1
+    assert procs[1].waiting_time == 8    # P2
+    assert procs[2].waiting_time == 2    # P3
+    assert procs[3].waiting_time == 2    # P4
+
+    assert procs[0].turnaround_time == 3   # P1
+    assert procs[1].turnaround_time == 13  # P2
+    assert procs[2].turnaround_time == 4   # P3
+    assert procs[3].turnaround_time == 6   # P4
 
 
 def test_thanos_boost():
@@ -41,11 +57,12 @@ def test_thanos_boost():
     scheduler = ThanosScheduler(time_quantum=2)
     result = scheduler.schedule(procs)
 
-    # t=0: P1(0-2) rem=1, half=1.5 → boost
-    # t=2: Queue=[P1(boosted), P2(6)]. P1(2-3) done
-    # t=3: P2(3-5) rem=4
-    # t=5: P2(5-7) rem=2, half=3 → boost
-    # t=7: P2(7-9) done
+    # t=0-2: P1 runs, rem=1. Arrivals: none (both AT=0, already in queue).
+    #   Boost: 1<=1.5 → appendleft. Queue: [P1(1), P2(6)]
+    # t=2-3: P1 runs, rem=0. Done. CT=3.
+    # t=3-5: P2 runs, rem=4. No boost. Queue: [P2(4)]
+    # t=5-7: P2 runs, rem=2. Boost: 2<=3 → appendleft. Queue: [P2(2)]
+    # t=7-9: P2 runs, rem=0. Done. CT=9.
     assert procs[0].completion_time == 3
     assert procs[1].completion_time == 9
 

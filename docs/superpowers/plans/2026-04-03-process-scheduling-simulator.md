@@ -986,6 +986,8 @@ git commit -m "feat: add HRRN scheduler with tests"
 
 ## Task 8: Thanos 커스텀 스케줄러
 
+> **확장 분석:** CI/CD 빌드 파이프라인 적용에 대한 학술적 분석은 [`docs/thanos-cicd-application.md`](../../thanos-cicd-application.md) 참조. 게임 서버와의 구조적 유사성 분석, 수학적 모델, 시뮬레이션 비교(FCFS/RR/SPN/Thanos) 포함.
+
 ### 대상 시스템: 온라인 게임 매칭 서버
 
 다수의 매치메이킹 요청(프로세스)이 동시에 들어오는 온라인 게임 서버 환경.
@@ -1153,11 +1155,7 @@ class ThanosScheduler(BaseScheduler):
             proc.remaining_time -= exec_time
             current_time = end
 
-            # 이 시간 동안 도착한 프로세스를 큐에 추가
-            while idx < n and sorted_procs[idx].arrival_time <= current_time:
-                ready_queue.append(sorted_procs[idx])
-                idx += 1
-
+            # 현재 프로세스 재큐잉 (도착 처리보다 먼저 — trace/테스트 기대값과 일치)
             if proc.remaining_time > 0:
                 half_threshold = proc.burst_time / 2
                 if proc.remaining_time <= half_threshold and proc.pid not in boosted:
@@ -1170,6 +1168,11 @@ class ThanosScheduler(BaseScheduler):
                 proc.completion_time = end
                 proc.turnaround_time = end - proc.arrival_time
                 proc.waiting_time = proc.turnaround_time - proc.burst_time
+
+            # 이 시간 동안 도착한 프로세스를 큐에 추가
+            while idx < n and sorted_procs[idx].arrival_time <= current_time:
+                ready_queue.append(sorted_procs[idx])
+                idx += 1
 
         return ScheduleResult(timeline=timeline, total_time=current_time)
 ```

@@ -2234,14 +2234,18 @@ from gui.comparison_view import ComparisonView
         self.input_panel.compare_requested.connect(self._on_compare)
 ```
 
-비교 실행 메서드:
+비교 실행 메서드 (코어 설정도 동일하게 적용):
 ```python
-    def _on_compare(self, quantum: int, proc_tuples: list):
+    def _on_compare(self, quantum: int, proc_tuples: list, core_tuples: list):
         reports = []
         for algo_name in ProcessInputPanel.ALGORITHMS:
             processes = [Process(pid, at, bt) for pid, at, bt in proc_tuples]
+            processors = [
+                Processor(cid, CoreType.P_CORE if ctype == "P" else CoreType.E_CORE)
+                for cid, ctype in core_tuples
+            ]
             scheduler = SCHEDULER_MAP[algo_name](quantum)
-            report = self.simulator.run(scheduler, processes)
+            report = self.simulator.run(scheduler, processes, processors)
             reports.append(report)
 
         self.comparison_view.set_results(reports)
@@ -2388,6 +2392,19 @@ def test_core_startup_power_after_idle():
     assert power == 0.1 + 1.0
 
 
+def test_core_no_startup_on_immediate_reassign():
+    """선점 후 즉시 재배정 시 시동전력 미발생 (idle tick 없음)"""
+    core = Processor(core_id=0, core_type=CoreType.E_CORE)
+    core.assign("P1")
+    power1 = core.tick()  # startup 0.1 + running 1.0 = 1.1
+    assert power1 == 1.1
+
+    core.release()           # release 직후
+    core.assign("P2")       # idle tick 없이 바로 재배정
+    power2 = core.tick()    # 시동전력 없음, running만 = 1.0
+    assert power2 == 1.0    # startup 미발생!
+
+
 def test_core_reset():
     core = Processor(core_id=0, core_type=CoreType.E_CORE)
     core.assign("P1")
@@ -2434,22 +2451,26 @@ class Processor:
         self.is_idle: bool = True
         self.total_power: float = 0.0
         self._needs_startup: bool = False
+        self._had_idle_tick: bool = True  # 초기 상태는 idle이므로 첫 사용 시 시동전력
 
     def assign(self, pid: str):
-        """프로세스를 이 코어에 할당"""
-        if self.is_idle:
+        """프로세스를 이 코어에 할당. 실제 idle tick이 있었을 때만 시동전력 발생."""
+        if self._had_idle_tick:
             self._needs_startup = True
         self.current_process = pid
         self.is_idle = False
+        self._had_idle_tick = False
 
     def release(self):
-        """현재 프로세스 해제"""
+        """현재 프로세스 해제 (다음 tick에서 assign 안 되면 idle로 확정)"""
         self.current_process = None
         self.is_idle = True
+        # _had_idle_tick은 아직 False: 다음 tick()에서 idle 상태가 확인되면 True로 전환
 
     def tick(self) -> float:
         """1초 진행. 소비전력 반환."""
         if self.is_idle:
+            self._had_idle_tick = True  # 실제로 idle tick이 지남 → 다음 assign 시 시동전력
             return 0.0
 
         power = self.power_per_tick
@@ -2465,12 +2486,13 @@ class Processor:
         self.is_idle = True
         self.total_power = 0.0
         self._needs_startup = False
+        self._had_idle_tick = True
 ```
 
 - [ ] **Step 4: 테스트 통과 확인**
 
 Run: `cd ~/development/process-scheduling-simulator && python -m pytest tests/test_processor.py -v`
-Expected: 7 passed
+Expected: 8 passed
 
 - [ ] **Step 5: 커밋**
 
@@ -2646,6 +2668,23 @@ def test_fcfs_multicore_p_core_ceiling():
     assert result.total_time == 1
     # 전력: 시동 0.5 + 1초 × 3W = 3.5W
     assert result.total_power == 3.5
+
+
+def test_fcfs_multicore_no_startup_on_consecutive():
+    """같은 코어에서 연속 실행 시 시동전력은 최초 1회만"""
+    procs = [
+        Process("P1", arrival_time=0, burst_time=2),
+        Process("P2", arrival_time=0, burst_time=3),
+    ]
+    cores = [
+        Processor(core_id=0, core_type=CoreType.E_CORE),
+    ]
+    scheduler = FCFSScheduler()
+    result = scheduler.schedule(procs, processors=cores)
+
+    # P1(0-2), P2(2-5): 연속, idle gap 없음
+    # 전력: 시동 0.1 (1회만) + 5초 × 1W = 5.1W
+    assert result.total_power == 5.1
 ```
 
 - [ ] **Step 2: 테스트 실패 확인**
@@ -2711,9 +2750,9 @@ class FCFSScheduler(BaseScheduler):
             if start > core_free_at[earliest_free]:
                 timeline.append(TimeSlot("idle", core_free_at[earliest_free], start, core.core_id))
 
-            # 전력 계산
-            was_idle = core_free_at[earliest_free] <= start
-            if was_idle:
+            # 전력 계산: 시동전력은 실제 idle gap이 있을 때만 (첫 사용 또는 빈 시간대)
+            has_idle_gap = core_free_at[earliest_free] < start or core_free_at[earliest_free] == 0
+            if has_idle_gap:
                 total_power += core.startup_power  # 시동전력
             total_power += exec_ticks * core.power_per_tick  # 동작전력
 
@@ -2788,7 +2827,7 @@ for core in processors:
 
 sorted_procs = sorted(processes, key=lambda p: (p.arrival_time, p.pid))
 ready_queue = deque()
-core_state = {}  # core_id → {"process": Process, "started_at": int, "ticks_on_core": int}
+core_state = {}  # core_id → {"process": Process, "started_at": int}
 for core in processors:
     core_state[core.core_id] = None
 
@@ -2798,6 +2837,7 @@ completed = 0
 timeline = []
 total_power = 0.0
 n = len(processes)
+exec_ticks = {}  # pid → 실제 실행에 사용된 tick 수 누적
 
 while completed < n:
     # 1. 도착 프로세스 추가
@@ -2810,8 +2850,10 @@ while completed < n:
         if core_state[core.core_id] is None and ready_queue:
             proc = _select_next(ready_queue)  # 스케줄러별 구현
             core_state[core.core_id] = {
-                "process": proc, "started_at": current_time, "ticks_on_core": 0
+                "process": proc, "started_at": current_time
             }
+            if proc.pid not in exec_ticks:
+                exec_ticks[proc.pid] = 0
             core.assign(proc.pid)
 
     # 3. 1 tick 실행
@@ -2821,7 +2863,7 @@ while completed < n:
             proc = state["process"]
             work_done = min(core.work_per_tick, proc.remaining_time)
             proc.remaining_time -= work_done
-            state["ticks_on_core"] += 1
+            exec_ticks[proc.pid] = exec_ticks.get(proc.pid, 0) + 1
             power = core.tick()
             total_power += power
 
@@ -2830,8 +2872,8 @@ while completed < n:
                 proc.remaining_time = 0
                 proc.completion_time = current_time + 1
                 proc.turnaround_time = proc.completion_time - proc.arrival_time
-                proc.waiting_time = proc.turnaround_time - math.ceil(proc.burst_time / core.work_per_tick)
-                # 주의: WT 계산은 여러 코어를 거칠 수 있으므로 TT - 실제 실행 tick 수
+                # WT = TT - 실제 실행에 사용된 총 tick 수 (코어 이동과 무관하게 정확)
+                proc.waiting_time = proc.turnaround_time - exec_ticks[proc.pid]
                 timeline.append(TimeSlot(proc.pid, state["started_at"], current_time + 1, core.core_id))
                 core.release()
                 core_state[core.core_id] = None

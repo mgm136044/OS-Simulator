@@ -2,9 +2,16 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Python + PyQt5 기반 프로세스 스케줄링 시뮬레이터. 6개 알고리즘(FCFS, RR, SPN, SRTN, HRRN, Thanos)을 Gantt 차트 애니메이션으로 시각화하고, 알고리즘 간 성능 비교 기능을 제공한다.
+**Goal:** Python + PyQt5 기반 프로세스 스케줄링 시뮬레이터. 6개 알고리즘(FCFS, RR, SPN, SRTN, HRRN, Thanos)을 **멀티코어(P core + E core)** 환경에서 Gantt 차트 애니메이션으로 시각화하고, **소비전력 계산** 및 알고리즘 간 성능 비교 기능을 제공한다. 마감: 2026-05-08(금) 23:59
 
-**Architecture:** 스케줄링 엔진(순수 로직)과 GUI(PyQt5)를 완전 분리. 각 스케줄러는 공통 인터페이스를 구현하며, Simulator 엔진이 스케줄러를 실행하고 실행 로그(타임라인)와 메트릭(AT, BT, WT, TT, NTT)을 산출한다. GUI는 이 결과를 받아 Gantt 차트, 결과 테이블, 비교 뷰로 렌더링한다.
+**Architecture:** 스케줄링 엔진(순수 로직)과 GUI(PyQt5)를 완전 분리. 각 스케줄러는 공통 인터페이스를 구현하며, Simulator 엔진이 스케줄러를 실행하고 실행 로그(코어별 타임라인)와 메트릭(AT, BT, WT, TT, NTT, 소비전력)을 산출한다. **멀티코어 지원**: 최대 4개 프로세서(P core: 2배 성능/3배 전력, E core: 기본), 시동전력 포함. 스케줄링은 1초 단위. GUI는 이 결과를 받아 코어별 Gantt 차트, Ready Queue 시각화, 결과 테이블, 비교 뷰로 렌더링한다.
+
+**제약 조건:**
+- 프로세스 최대 15개
+- 프로세서 최대 4개 (P core / E core 지정 가능)
+- E core: 1초에 1 work unit, 1W 소비, 시동전력 0.1W
+- P core: 1초에 2 work unit(2배 성능), 3W 소비(3배), 시동전력 0.5W
+- 스케줄링 1초 단위 (소수점 불가). P core에서 남은 일이 1이어도 1초 소모
 
 **Tech Stack:** Python 3.11+, PyQt5, pytest
 
@@ -17,9 +24,10 @@ process-scheduling-simulator/
 ├── src/
 │   ├── main.py                  # 앱 엔트리포인트
 │   ├── models/
-│   │   └── process.py           # Process 데이터 모델
+│   │   ├── process.py           # Process 데이터 모델
+│   │   └── processor.py         # Processor(코어) 데이터 모델 (P core / E core)
 │   ├── schedulers/
-│   │   ├── base.py              # BaseScheduler ABC
+│   │   ├── base.py              # BaseScheduler ABC (멀티코어 지원)
 │   │   ├── fcfs.py              # FCFS 스케줄러
 │   │   ├── rr.py                # Round Robin 스케줄러
 │   │   ├── spn.py               # SPN 스케줄러
@@ -27,22 +35,27 @@ process-scheduling-simulator/
 │   │   ├── hrrn.py              # HRRN 스케줄러
 │   │   └── thanos.py            # Thanos 커스텀 스케줄러
 │   ├── engine/
-│   │   └── simulator.py         # 시뮬레이션 엔진 (실행 + 메트릭 계산)
+│   │   ├── simulator.py         # 시뮬레이션 엔진 (실행 + 메트릭 계산)
+│   │   └── power.py             # 소비전력 계산 모듈
 │   └── gui/
 │       ├── main_window.py       # 메인 윈도우 레이아웃
 │       ├── process_input.py     # 프로세스 입력 패널
-│       ├── gantt_chart.py       # Gantt 차트 위젯
-│       ├── result_table.py      # 결과 테이블 위젯
+│       ├── processor_config.py  # 프로세서 설정 패널 (코어 수, P/E 타입)
+│       ├── gantt_chart.py       # Gantt 차트 위젯 (코어별)
+│       ├── ready_queue_view.py  # Ready Queue 시각화 위젯
+│       ├── result_table.py      # 결과 테이블 위젯 (전력 포함)
 │       ├── comparison_view.py   # 알고리즘 비교 뷰
 │       └── theme.py             # 다크 테마 스타일시트
 ├── tests/
 │   ├── test_process.py
+│   ├── test_processor.py
 │   ├── test_fcfs.py
 │   ├── test_rr.py
 │   ├── test_spn.py
 │   ├── test_srtn.py
 │   ├── test_hrrn.py
 │   ├── test_thanos.py
+│   ├── test_power.py
 │   └── test_simulator.py
 └── requirements.txt
 ```
@@ -2297,4 +2310,1229 @@ Run: `cd ~/development/process-scheduling-simulator/src && python main.py`
 cd ~/development/process-scheduling-simulator
 git add src/models/__init__.py src/schedulers/__init__.py src/engine/__init__.py src/gui/__init__.py
 git commit -m "feat: add package init files and verify full integration"
+```
+
+---
+
+## Task 16: Processor(코어) 모델 — P core / E core
+
+**Files:**
+- Create: `src/models/processor.py`
+- Create: `tests/test_processor.py`
+
+**시스템 속성:**
+- E core: 1초에 1 work unit 처리, 1W 전력, 시동전력 0.1W
+- P core: 1초에 2 work unit 처리, 3W 전력, 시동전력 0.5W
+- 시동전력: 미사용 중이던 코어를 사용하는 경우 1회 발생
+
+- [ ] **Step 1: 테스트 작성**
+
+```python
+# tests/test_processor.py
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from models.processor import Processor, CoreType
+
+
+def test_e_core_properties():
+    core = Processor(core_id=0, core_type=CoreType.E_CORE)
+    assert core.work_per_tick == 1
+    assert core.power_per_tick == 1.0
+    assert core.startup_power == 0.1
+
+
+def test_p_core_properties():
+    core = Processor(core_id=0, core_type=CoreType.P_CORE)
+    assert core.work_per_tick == 2
+    assert core.power_per_tick == 3.0
+    assert core.startup_power == 0.5
+
+
+def test_core_initial_state():
+    core = Processor(core_id=0, core_type=CoreType.E_CORE)
+    assert core.is_idle is True
+    assert core.current_process is None
+    assert core.total_power == 0.0
+
+
+def test_core_assign_process():
+    core = Processor(core_id=0, core_type=CoreType.E_CORE)
+    core.assign("P1")
+    assert core.is_idle is False
+    assert core.current_process == "P1"
+
+
+def test_core_startup_power_on_first_use():
+    core = Processor(core_id=0, core_type=CoreType.P_CORE)
+    power = core.tick()  # idle → 사용: 시동전력은 assign 시점에 발생
+    assert power == 0.0  # idle이면 전력 0
+
+    core.assign("P1")
+    power = core.tick()  # 첫 사용: startup + running
+    assert power == 0.5 + 3.0  # 시동전력 + 동작전력
+
+    power = core.tick()  # 계속 사용중: running만
+    assert power == 3.0
+
+
+def test_core_startup_power_after_idle():
+    core = Processor(core_id=0, core_type=CoreType.E_CORE)
+    core.assign("P1")
+    core.tick()  # startup + running = 0.1 + 1.0
+    core.release()
+    core.tick()  # idle tick
+
+    core.assign("P2")  # 다시 사용 → 시동전력 재발생
+    power = core.tick()
+    assert power == 0.1 + 1.0
+
+
+def test_core_reset():
+    core = Processor(core_id=0, core_type=CoreType.E_CORE)
+    core.assign("P1")
+    core.tick()
+    core.reset()
+    assert core.is_idle is True
+    assert core.total_power == 0.0
+```
+
+- [ ] **Step 2: 테스트 실패 확인**
+
+Run: `cd ~/development/process-scheduling-simulator && python -m pytest tests/test_processor.py -v`
+Expected: FAIL
+
+- [ ] **Step 3: Processor 모델 구현**
+
+```python
+# src/models/processor.py
+from enum import Enum
+
+
+class CoreType(Enum):
+    P_CORE = "P"
+    E_CORE = "E"
+
+
+class Processor:
+    """프로세서(코어) 모델. P core / E core 구분."""
+
+    SPECS = {
+        CoreType.P_CORE: {"work_per_tick": 2, "power_per_tick": 3.0, "startup_power": 0.5},
+        CoreType.E_CORE: {"work_per_tick": 1, "power_per_tick": 1.0, "startup_power": 0.1},
+    }
+
+    def __init__(self, core_id: int, core_type: CoreType):
+        self.core_id = core_id
+        self.core_type = core_type
+        spec = self.SPECS[core_type]
+        self.work_per_tick: int = spec["work_per_tick"]
+        self.power_per_tick: float = spec["power_per_tick"]
+        self.startup_power: float = spec["startup_power"]
+
+        self.current_process: str | None = None
+        self.is_idle: bool = True
+        self.total_power: float = 0.0
+        self._needs_startup: bool = False
+
+    def assign(self, pid: str):
+        """프로세스를 이 코어에 할당"""
+        if self.is_idle:
+            self._needs_startup = True
+        self.current_process = pid
+        self.is_idle = False
+
+    def release(self):
+        """현재 프로세스 해제"""
+        self.current_process = None
+        self.is_idle = True
+
+    def tick(self) -> float:
+        """1초 진행. 소비전력 반환."""
+        if self.is_idle:
+            return 0.0
+
+        power = self.power_per_tick
+        if self._needs_startup:
+            power += self.startup_power
+            self._needs_startup = False
+
+        self.total_power += power
+        return power
+
+    def reset(self):
+        self.current_process = None
+        self.is_idle = True
+        self.total_power = 0.0
+        self._needs_startup = False
+```
+
+- [ ] **Step 4: 테스트 통과 확인**
+
+Run: `cd ~/development/process-scheduling-simulator && python -m pytest tests/test_processor.py -v`
+Expected: 7 passed
+
+- [ ] **Step 5: 커밋**
+
+```bash
+cd ~/development/process-scheduling-simulator
+git add src/models/processor.py tests/test_processor.py
+git commit -m "feat: add Processor model with P-core/E-core specs and power tracking"
+```
+
+---
+
+## Task 17: 멀티코어 스케줄러 확장 — BaseScheduler 리팩토링
+
+**Files:**
+- Modify: `src/schedulers/base.py`
+
+현재 BaseScheduler는 단일 코어 전제. 멀티코어를 지원하도록 `ScheduleResult`와 인터페이스를 확장한다.
+
+- [ ] **Step 1: base.py 확장**
+
+```python
+# src/schedulers/base.py
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import Optional
+
+
+@dataclass
+class TimeSlot:
+    """Gantt 차트 한 칸: 어떤 프로세스가 어느 코어에서 언제부터 언제까지 실행되었는지"""
+    pid: str          # 프로세스 ID ("idle" for idle)
+    start: int
+    end: int
+    core_id: int = 0  # 코어 ID (단일코어는 0)
+
+
+@dataclass
+class ScheduleResult:
+    """스케줄링 결과"""
+    timeline: list[TimeSlot] = field(default_factory=list)
+    total_time: int = 0
+    total_power: float = 0.0  # 총 소비전력
+
+    def get_core_timeline(self, core_id: int) -> list[TimeSlot]:
+        """특정 코어의 타임라인만 반환"""
+        return [slot for slot in self.timeline if slot.core_id == core_id]
+
+
+class BaseScheduler(ABC):
+    """모든 스케줄러의 공통 인터페이스"""
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        ...
+
+    @abstractmethod
+    def schedule(self, processes: list, processors: list | None = None) -> ScheduleResult:
+        """
+        프로세스 리스트를 받아 스케줄링 실행.
+        processors가 None이면 E core 1개로 동작 (하위호환).
+        - 각 프로세스의 WT, TT, CT 필드를 업데이트
+        - ScheduleResult (코어별 타임라인 + 전력) 반환
+        """
+        ...
+```
+
+- [ ] **Step 2: 기존 테스트 통과 확인**
+
+Run: `cd ~/development/process-scheduling-simulator && python -m pytest tests/ -v`
+Expected: 기존 테스트 전부 통과 (TimeSlot에 core_id=0 기본값이라 하위호환 유지)
+
+- [ ] **Step 3: 커밋**
+
+```bash
+cd ~/development/process-scheduling-simulator
+git add src/schedulers/base.py
+git commit -m "feat: extend BaseScheduler and ScheduleResult for multi-core support"
+```
+
+---
+
+## Task 18: 멀티코어 FCFS 구현 (대표 멀티코어 스케줄러)
+
+**Files:**
+- Modify: `src/schedulers/fcfs.py`
+- Create: `tests/test_fcfs_multicore.py`
+
+멀티코어 스케줄링 전략: 도착한 프로세스를 가장 먼저 비는 코어에 할당. 동시에 비면 core_id가 낮은 코어 우선.
+
+**멀티코어 FCFS 검증 (E core 1개 + P core 1개):**
+- 프로세스: P1(AT=0, BT=4), P2(AT=0, BT=6), P3(AT=3, BT=2)
+- E core (core 0): work_per_tick=1, P core (core 1): work_per_tick=2
+- t=0: P1→core0 (E, 4/1=4초), P2→core1 (P, 6/2=3초, 남은일 6, 매 tick -2)
+  - P core에서 BT=6 처리 시 ceil(6/2)=3초 소요
+- t=3: core1 비었음. P3→core1 (P, 2/2=1초)
+- t=4: core0 완료(P1), core1 완료(P3)
+- P1: CT=4, TT=4, WT=0
+- P2: CT=3, TT=3, WT=0 (P core에서 3초만에 완료)
+  - 주의: BT는 work unit 기준, CT는 실제 경과 시간
+  - WT = CT - AT - ceil(BT / work_per_tick) 이 아니라
+  - WT = 실제 대기한 시간 (ready queue에서 보낸 시간)
+- P3: CT=4, TT=4-3=1, WT=0
+
+- [ ] **Step 1: 멀티코어 테스트 작성**
+
+```python
+# tests/test_fcfs_multicore.py
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+import math
+from models.process import Process
+from models.processor import Processor, CoreType
+from schedulers.fcfs import FCFSScheduler
+
+
+def test_fcfs_multicore_two_cores():
+    procs = [
+        Process("P1", arrival_time=0, burst_time=4),
+        Process("P2", arrival_time=0, burst_time=6),
+        Process("P3", arrival_time=3, burst_time=2),
+    ]
+    cores = [
+        Processor(core_id=0, core_type=CoreType.E_CORE),
+        Processor(core_id=1, core_type=CoreType.P_CORE),
+    ]
+    scheduler = FCFSScheduler()
+    result = scheduler.schedule(procs, processors=cores)
+
+    # P1 → E core(0): ceil(4/1)=4초, CT=4
+    # P2 → P core(1): ceil(6/2)=3초, CT=3
+    # P3 → t=3에 도착, core1 비었음 → P core(1): ceil(2/2)=1초, CT=4
+    assert procs[0].completion_time == 4
+    assert procs[1].completion_time == 3
+    assert procs[2].completion_time == 4
+
+    assert procs[0].waiting_time == 0
+    assert procs[1].waiting_time == 0
+    assert procs[2].waiting_time == 0
+
+
+def test_fcfs_multicore_power():
+    procs = [
+        Process("P1", arrival_time=0, burst_time=2),
+    ]
+    cores = [
+        Processor(core_id=0, core_type=CoreType.E_CORE),
+        Processor(core_id=1, core_type=CoreType.P_CORE),
+    ]
+    scheduler = FCFSScheduler()
+    result = scheduler.schedule(procs, processors=cores)
+
+    # P1 → core0 (E core): 2초 동작
+    # 전력: 시동 0.1W + 2초 × 1W = 2.1W
+    # core1은 사용 안 함 → 0W
+    assert result.total_power == 2.1
+
+
+def test_fcfs_multicore_p_core_ceiling():
+    """P core에서 BT=1 → 남은 work=1, work_per_tick=2이지만 1초 소모"""
+    procs = [
+        Process("P1", arrival_time=0, burst_time=1),
+    ]
+    cores = [
+        Processor(core_id=0, core_type=CoreType.P_CORE),
+    ]
+    scheduler = FCFSScheduler()
+    result = scheduler.schedule(procs, processors=cores)
+
+    # P core에서 BT=1: ceil(1/2)=1초
+    assert procs[0].completion_time == 1
+    assert result.total_time == 1
+    # 전력: 시동 0.5 + 1초 × 3W = 3.5W
+    assert result.total_power == 3.5
+```
+
+- [ ] **Step 2: 테스트 실패 확인**
+
+Run: `cd ~/development/process-scheduling-simulator && python -m pytest tests/test_fcfs_multicore.py -v`
+Expected: FAIL
+
+- [ ] **Step 3: FCFS 멀티코어 구현**
+
+```python
+# src/schedulers/fcfs.py
+import math
+from collections import deque
+from models.process import Process
+from models.processor import Processor, CoreType
+from schedulers.base import BaseScheduler, ScheduleResult, TimeSlot
+
+
+class FCFSScheduler(BaseScheduler):
+
+    @property
+    def name(self) -> str:
+        return "FCFS"
+
+    def schedule(self, processes: list[Process], processors: list[Processor] | None = None) -> ScheduleResult:
+        for p in processes:
+            p.reset()
+
+        # 프로세서 미지정 시 E core 1개로 단일코어 동작
+        if processors is None:
+            processors = [Processor(core_id=0, core_type=CoreType.E_CORE)]
+        for core in processors:
+            core.reset()
+
+        sorted_procs = deque(sorted(processes, key=lambda p: (p.arrival_time, p.pid)))
+        timeline: list[TimeSlot] = []
+        n = len(processes)
+        completed = 0
+        current_time = 0
+
+        # 각 코어의 종료 시각과 현재 작업 추적
+        core_free_at: list[int] = [0] * len(processors)  # 각 코어가 비는 시각
+        core_slots: list[list[TimeSlot]] = [[] for _ in processors]
+
+        # FCFS: 도착순으로 가장 먼저 비는 코어에 할당
+        total_power = 0.0
+        assigned: list[tuple] = []  # (start_time, end_time, core_id, process)
+
+        for proc in sorted_procs:
+            # 가장 먼저 비는 코어 찾기 (동률이면 core_id 낮은 것)
+            earliest_free = min(
+                range(len(processors)),
+                key=lambda i: (max(core_free_at[i], proc.arrival_time), i)
+            )
+            core = processors[earliest_free]
+            start = max(core_free_at[earliest_free], proc.arrival_time)
+            exec_ticks = math.ceil(proc.burst_time / core.work_per_tick)
+            end = start + exec_ticks
+
+            timeline.append(TimeSlot(proc.pid, start, end, core.core_id))
+
+            # idle 슬롯 삽입
+            if start > core_free_at[earliest_free]:
+                timeline.append(TimeSlot("idle", core_free_at[earliest_free], start, core.core_id))
+
+            # 전력 계산
+            was_idle = core_free_at[earliest_free] <= start
+            if was_idle:
+                total_power += core.startup_power  # 시동전력
+            total_power += exec_ticks * core.power_per_tick  # 동작전력
+
+            core_free_at[earliest_free] = end
+            proc.completion_time = end
+            proc.turnaround_time = end - proc.arrival_time
+            proc.waiting_time = start - proc.arrival_time
+            proc.remaining_time = 0
+
+        total_time = max(core_free_at) if core_free_at else 0
+
+        # 타임라인을 시간순 정렬
+        timeline.sort(key=lambda s: (s.core_id, s.start))
+
+        return ScheduleResult(timeline=timeline, total_time=total_time, total_power=round(total_power, 2))
+```
+
+- [ ] **Step 4: 기존 + 새 테스트 통과 확인**
+
+Run: `cd ~/development/process-scheduling-simulator && python -m pytest tests/test_fcfs.py tests/test_fcfs_multicore.py -v`
+Expected: 전부 passed (기존 단일코어 테스트도 하위호환으로 통과)
+
+- [ ] **Step 5: 커밋**
+
+```bash
+cd ~/development/process-scheduling-simulator
+git add src/schedulers/fcfs.py tests/test_fcfs_multicore.py
+git commit -m "feat: add multi-core support to FCFS scheduler with power calculation"
+```
+
+---
+
+## Task 19: 나머지 스케줄러 멀티코어 확장
+
+**Files:**
+- Modify: `src/schedulers/rr.py`
+- Modify: `src/schedulers/spn.py`
+- Modify: `src/schedulers/srtn.py`
+- Modify: `src/schedulers/hrrn.py`
+- Modify: `src/schedulers/thanos.py`
+
+멀티코어 확장 패턴은 FCFS와 동일: `processors` 파라미터 추가, 기본값 None → E core 1개.
+핵심 차이점:
+- **비선점(FCFS, SPN, HRRN):** 프로세스 선택 후 빈 코어에 할당. 끝날 때까지 점유.
+- **선점(RR, SRTN, Thanos):** 매 tick마다 코어별로 실행 중인 프로세스를 평가. Time quantum 만료/더 짧은 프로세스 도착 시 ready queue로 반환 후 재할당.
+
+모든 스케줄러에서 tick 기반 시뮬레이션으로 통일:
+- 매 tick(1초)마다: 도착 프로세스 ready queue 추가 → 빈 코어에 할당 → 각 코어 1 tick 실행 (work_per_tick만큼 remaining 감소) → 완료된 프로세스 처리
+- P core에서 remaining이 work_per_tick보다 작아도 1초 소모 (남은 일이 1이어도 1초)
+
+- [ ] **Step 1: 각 스케줄러에 processors 파라미터 추가 + tick 기반 멀티코어 로직 구현**
+
+각 스케줄러의 `schedule` 메서드 시그니처를 변경:
+```python
+def schedule(self, processes: list[Process], processors: list[Processor] | None = None) -> ScheduleResult:
+```
+
+`processors is None`이면 `[Processor(0, CoreType.E_CORE)]`로 초기화.
+
+선점형 스케줄러(RR, SRTN, Thanos) 멀티코어 tick 루프 공통 패턴:
+
+```python
+import math
+from collections import deque
+from models.processor import Processor, CoreType
+
+# 초기화
+if processors is None:
+    processors = [Processor(core_id=0, core_type=CoreType.E_CORE)]
+for core in processors:
+    core.reset()
+
+sorted_procs = sorted(processes, key=lambda p: (p.arrival_time, p.pid))
+ready_queue = deque()
+core_state = {}  # core_id → {"process": Process, "started_at": int, "ticks_on_core": int}
+for core in processors:
+    core_state[core.core_id] = None
+
+current_time = 0
+idx = 0
+completed = 0
+timeline = []
+total_power = 0.0
+n = len(processes)
+
+while completed < n:
+    # 1. 도착 프로세스 추가
+    while idx < n and sorted_procs[idx].arrival_time <= current_time:
+        ready_queue.append(sorted_procs[idx])
+        idx += 1
+
+    # 2. 빈 코어에 프로세스 할당 (스케줄러별 선택 로직)
+    for core in processors:
+        if core_state[core.core_id] is None and ready_queue:
+            proc = _select_next(ready_queue)  # 스케줄러별 구현
+            core_state[core.core_id] = {
+                "process": proc, "started_at": current_time, "ticks_on_core": 0
+            }
+            core.assign(proc.pid)
+
+    # 3. 1 tick 실행
+    for core in processors:
+        state = core_state[core.core_id]
+        if state is not None:
+            proc = state["process"]
+            work_done = min(core.work_per_tick, proc.remaining_time)
+            proc.remaining_time -= work_done
+            state["ticks_on_core"] += 1
+            power = core.tick()
+            total_power += power
+
+            # 완료 체크
+            if proc.remaining_time <= 0:
+                proc.remaining_time = 0
+                proc.completion_time = current_time + 1
+                proc.turnaround_time = proc.completion_time - proc.arrival_time
+                proc.waiting_time = proc.turnaround_time - math.ceil(proc.burst_time / core.work_per_tick)
+                # 주의: WT 계산은 여러 코어를 거칠 수 있으므로 TT - 실제 실행 tick 수
+                timeline.append(TimeSlot(proc.pid, state["started_at"], current_time + 1, core.core_id))
+                core.release()
+                core_state[core.core_id] = None
+                completed += 1
+
+            # 선점 체크 (RR: quantum 만료, SRTN: 더 짧은 도착 등)
+            elif _should_preempt(state, core, ready_queue):  # 스케줄러별
+                timeline.append(TimeSlot(proc.pid, state["started_at"], current_time + 1, core.core_id))
+                ready_queue.append(proc)  # 또는 appendleft (Thanos boost)
+                core.release()
+                core_state[core.core_id] = None
+
+    current_time += 1
+
+    # 4. idle 코어 처리 (아무 일 안 함, 전력 0)
+```
+
+비선점 스케줄러(SPN, HRRN)는 FCFS와 유사한 "빈 코어에 할당" 패턴 사용.
+
+- [ ] **Step 2: 각 스케줄러의 기존 단일코어 테스트 통과 확인**
+
+Run: `cd ~/development/process-scheduling-simulator && python -m pytest tests/ -v`
+Expected: 기존 테스트 전부 통과
+
+- [ ] **Step 3: 커밋**
+
+```bash
+cd ~/development/process-scheduling-simulator
+git add src/schedulers/
+git commit -m "feat: extend all schedulers with multi-core processor support"
+```
+
+---
+
+## Task 20: 소비전력 계산 모듈
+
+**Files:**
+- Create: `src/engine/power.py`
+- Create: `tests/test_power.py`
+
+- [ ] **Step 1: 테스트 작성**
+
+```python
+# tests/test_power.py
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from engine.power import calc_power_summary
+from models.processor import Processor, CoreType
+from schedulers.base import TimeSlot
+
+
+def test_power_single_e_core():
+    cores = [Processor(0, CoreType.E_CORE)]
+    timeline = [TimeSlot("P1", 0, 3, 0)]
+    total_time = 3
+
+    summary = calc_power_summary(cores, timeline, total_time)
+    # E core: startup 0.1 + 3초 × 1W = 3.1W
+    assert summary["total_power"] == 3.1
+    assert summary["cores"][0]["power"] == 3.1
+    assert summary["cores"][0]["utilization"] == 100.0
+
+
+def test_power_mixed_cores():
+    cores = [Processor(0, CoreType.E_CORE), Processor(1, CoreType.P_CORE)]
+    timeline = [
+        TimeSlot("P1", 0, 3, 0),  # E core 3초
+        TimeSlot("P2", 0, 2, 1),  # P core 2초
+    ]
+    total_time = 3
+
+    summary = calc_power_summary(cores, timeline, total_time)
+    # E: 0.1 + 3*1 = 3.1W, P: 0.5 + 2*3 = 6.5W → total 9.6W
+    assert summary["total_power"] == 9.6
+    assert summary["cores"][0]["utilization"] == 100.0  # 3/3
+    assert summary["cores"][1]["utilization"] == round(2/3*100, 1)  # 66.7%
+
+
+def test_power_idle_core():
+    cores = [Processor(0, CoreType.E_CORE), Processor(1, CoreType.P_CORE)]
+    timeline = [TimeSlot("P1", 0, 2, 0)]
+    total_time = 2
+
+    summary = calc_power_summary(cores, timeline, total_time)
+    # E: 0.1 + 2*1 = 2.1W, P: 미사용 0W → total 2.1W
+    assert summary["total_power"] == 2.1
+    assert summary["cores"][1]["power"] == 0.0
+    assert summary["cores"][1]["utilization"] == 0.0
+```
+
+- [ ] **Step 2: 테스트 실패 확인**
+
+Run: `cd ~/development/process-scheduling-simulator && python -m pytest tests/test_power.py -v`
+Expected: FAIL
+
+- [ ] **Step 3: 소비전력 모듈 구현**
+
+```python
+# src/engine/power.py
+from models.processor import Processor
+from schedulers.base import TimeSlot
+
+
+def calc_power_summary(
+    processors: list[Processor],
+    timeline: list[TimeSlot],
+    total_time: int,
+) -> dict:
+    """코어별/전체 소비전력과 가동률 계산"""
+    core_info = {}
+    for core in processors:
+        core_info[core.core_id] = {
+            "core_type": core.core_type.value,
+            "power": 0.0,
+            "busy_ticks": 0,
+        }
+
+    for slot in timeline:
+        if slot.pid == "idle":
+            continue
+        cid = slot.core_id
+        if cid not in core_info:
+            continue
+        core = next(c for c in processors if c.core_id == cid)
+        ticks = slot.end - slot.start
+        core_info[cid]["busy_ticks"] += ticks
+        core_info[cid]["power"] += ticks * core.power_per_tick
+
+    # 시동전력: 코어가 사용된 적 있으면 1회 (간단 모델)
+    # 실제로는 idle→busy 전환마다 발생하지만, 타임라인에서 gap 감지
+    for core in processors:
+        cid = core.core_id
+        slots = sorted(
+            [s for s in timeline if s.core_id == cid and s.pid != "idle"],
+            key=lambda s: s.start,
+        )
+        if not slots:
+            continue
+        # 첫 사용 시 시동전력
+        core_info[cid]["power"] += core.startup_power
+        # 이후 gap이 있으면 시동전력 추가
+        for i in range(1, len(slots)):
+            if slots[i].start > slots[i - 1].end:
+                core_info[cid]["power"] += core.startup_power
+
+    total_power = sum(info["power"] for info in core_info.values())
+
+    cores_summary = []
+    for core in processors:
+        cid = core.core_id
+        info = core_info[cid]
+        util = round(info["busy_ticks"] / total_time * 100, 1) if total_time > 0 else 0.0
+        cores_summary.append({
+            "core_id": cid,
+            "core_type": info["core_type"],
+            "power": round(info["power"], 2),
+            "utilization": util,
+        })
+
+    return {
+        "total_power": round(total_power, 2),
+        "cores": cores_summary,
+    }
+```
+
+- [ ] **Step 4: 테스트 통과 확인**
+
+Run: `cd ~/development/process-scheduling-simulator && python -m pytest tests/test_power.py -v`
+Expected: 3 passed
+
+- [ ] **Step 5: 커밋**
+
+```bash
+cd ~/development/process-scheduling-simulator
+git add src/engine/power.py tests/test_power.py
+git commit -m "feat: add power consumption calculation module"
+```
+
+---
+
+## Task 21: Simulator 엔진 멀티코어 + 전력 통합
+
+**Files:**
+- Modify: `src/engine/simulator.py`
+- Modify: `tests/test_simulator.py`
+
+- [ ] **Step 1: Simulator에 processors 파라미터 추가**
+
+```python
+# src/engine/simulator.py
+from models.process import Process
+from models.processor import Processor, CoreType
+from schedulers.base import BaseScheduler
+from engine.power import calc_power_summary
+
+
+class Simulator:
+
+    def run(
+        self,
+        scheduler: BaseScheduler,
+        processes: list[Process],
+        processors: list[Processor] | None = None,
+    ) -> dict:
+        """스케줄러 실행 후 리포트 딕셔너리 반환"""
+        result = scheduler.schedule(processes, processors)
+
+        process_details = []
+        for p in processes:
+            process_details.append({
+                "pid": p.pid,
+                "at": p.arrival_time,
+                "bt": p.burst_time,
+                "ct": p.completion_time,
+                "wt": p.waiting_time,
+                "tt": p.turnaround_time,
+                "ntt": round(p.ntt, 2),
+            })
+
+        n = len(processes)
+        avg_wt = sum(p.waiting_time for p in processes) / n if n else 0
+        avg_tt = sum(p.turnaround_time for p in processes) / n if n else 0
+        avg_ntt = sum(p.ntt for p in processes) / n if n else 0
+
+        # 전력 요약
+        power_summary = None
+        if processors is not None:
+            power_summary = calc_power_summary(processors, result.timeline, result.total_time)
+
+        return {
+            "algorithm": scheduler.name,
+            "total_time": result.total_time,
+            "timeline": result.timeline,
+            "processes": process_details,
+            "metrics": {
+                "avg_wt": round(avg_wt, 2),
+                "avg_tt": round(avg_tt, 2),
+                "avg_ntt": round(avg_ntt, 2),
+            },
+            "power": power_summary,
+        }
+```
+
+- [ ] **Step 2: 기존 테스트 통과 확인 (하위호환)**
+
+Run: `cd ~/development/process-scheduling-simulator && python -m pytest tests/test_simulator.py -v`
+Expected: 기존 3개 테스트 통과 (power는 None)
+
+- [ ] **Step 3: 커밋**
+
+```bash
+cd ~/development/process-scheduling-simulator
+git add src/engine/simulator.py
+git commit -m "feat: integrate multi-core and power calculation into Simulator"
+```
+
+---
+
+## Task 22: GUI — 프로세서 설정 패널
+
+**Files:**
+- Create: `src/gui/processor_config.py`
+- Modify: `src/gui/process_input.py`
+
+- [ ] **Step 1: 프로세서 설정 위젯 작성**
+
+```python
+# src/gui/processor_config.py
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QSpinBox, QComboBox, QGroupBox, QRadioButton,
+    QButtonGroup,
+)
+from PyQt5.QtCore import Qt
+
+
+class CoreConfigRow(QWidget):
+    """개별 코어 설정 행: OFF / P-Core / E-Core 라디오"""
+
+    def __init__(self, core_id: int):
+        super().__init__()
+        self.core_id = core_id
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        label = QLabel(f"Core {core_id}")
+        label.setFixedWidth(60)
+        layout.addWidget(label)
+
+        self.btn_group = QButtonGroup(self)
+        self.off_btn = QRadioButton("OFF")
+        self.p_btn = QRadioButton("P-Core")
+        self.e_btn = QRadioButton("E-Core")
+
+        self.btn_group.addButton(self.off_btn, 0)
+        self.btn_group.addButton(self.p_btn, 1)
+        self.btn_group.addButton(self.e_btn, 2)
+
+        # 기본값: Core 0은 E-Core, 나머지 OFF
+        if core_id == 0:
+            self.e_btn.setChecked(True)
+        else:
+            self.off_btn.setChecked(True)
+
+        layout.addWidget(self.off_btn)
+        layout.addWidget(self.p_btn)
+        layout.addWidget(self.e_btn)
+
+    def get_type(self) -> str | None:
+        """'P', 'E', 또는 None (OFF)"""
+        checked = self.btn_group.checkedId()
+        if checked == 1:
+            return "P"
+        elif checked == 2:
+            return "E"
+        return None
+
+
+class ProcessorConfigPanel(QWidget):
+    """프로세서 설정 패널: 최대 4코어, P/E/OFF 선택"""
+
+    def __init__(self):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        header = QHBoxLayout()
+        header.addWidget(QLabel("프로세서 설정 (최대 4코어)"))
+        layout.addLayout(header)
+
+        self.core_rows: list[CoreConfigRow] = []
+        for i in range(4):
+            row = CoreConfigRow(i)
+            self.core_rows.append(row)
+            layout.addWidget(row)
+
+        # 스펙 안내
+        spec_label = QLabel(
+            "P-Core: 2배 성능, 3W, 시동 0.5W  |  E-Core: 1배 성능, 1W, 시동 0.1W"
+        )
+        spec_label.setStyleSheet("color: #6c7086; font-size: 11px;")
+        layout.addWidget(spec_label)
+
+    def get_active_cores(self) -> list[tuple[int, str]]:
+        """활성화된 코어 목록 반환: [(core_id, 'P' or 'E'), ...]"""
+        cores = []
+        for row in self.core_rows:
+            core_type = row.get_type()
+            if core_type is not None:
+                cores.append((row.core_id, core_type))
+        return cores
+```
+
+- [ ] **Step 2: process_input.py에 프로세서 설정 통합 + 프로세스 15개 제한 + 무작위 추가 버튼**
+
+`src/gui/process_input.py`의 `__init__`에서 프로세서 설정 패널 추가, 프로세스 추가 시 15개 제한:
+
+import에 추가:
+```python
+import random
+from gui.processor_config import ProcessorConfigPanel
+```
+
+시그널 변경 (코어 정보 포함):
+```python
+    run_requested = pyqtSignal(str, int, list, list)  # (algorithm, quantum, [(pid,at,bt)], [(core_id,type)])
+    compare_requested = pyqtSignal(int, list, list)    # (quantum, [(pid,at,bt)], [(core_id,type)])
+```
+
+`__init__`에서 프로세서 설정 패널을 알고리즘 선택 앞에 추가:
+```python
+        # 프로세서 설정
+        self.processor_config = ProcessorConfigPanel()
+        layout.addWidget(self.processor_config)
+```
+
+프로세스 추가에 15개 제한:
+```python
+    def _add_process(self):
+        if self.table.rowCount() >= 15:
+            QMessageBox.warning(self, "경고", "프로세스는 최대 15개까지 추가할 수 있습니다.")
+            return
+        # ... 기존 로직
+```
+
+무작위 추가 버튼 (추가 버튼 옆에):
+```python
+        self.random_btn = QPushButton("무작위 추가")
+        self.random_btn.clicked.connect(self._add_random_process)
+        input_layout.addWidget(self.random_btn)
+```
+
+```python
+    def _add_random_process(self):
+        if self.table.rowCount() >= 15:
+            QMessageBox.warning(self, "경고", "프로세스는 최대 15개까지 추가할 수 있습니다.")
+            return
+        self.at_spin.setValue(random.randint(0, 20))
+        self.bt_spin.setValue(random.randint(1, 15))
+        self._add_process()
+```
+
+`_on_run`과 `_on_compare`에서 코어 정보 emit:
+```python
+    def _on_run(self):
+        # ... 기존 유효성 검사 ...
+        cores = self.processor_config.get_active_cores()
+        if not cores:
+            QMessageBox.warning(self, "경고", "활성화된 코어가 없습니다.")
+            return
+        self.run_requested.emit(algo, quantum, procs, cores)
+
+    def _on_compare(self):
+        # ... 기존 유효성 검사 ...
+        cores = self.processor_config.get_active_cores()
+        if not cores:
+            QMessageBox.warning(self, "경고", "활성화된 코어가 없습니다.")
+            return
+        self.compare_requested.emit(quantum, procs, cores)
+```
+
+- [ ] **Step 3: MainWindow에서 코어 정보 반영**
+
+`src/gui/main_window.py`의 `_on_run` 시그니처 변경:
+```python
+    def _on_run(self, algo_name: str, quantum: int, proc_tuples: list, core_tuples: list):
+        processes = [Process(pid, at, bt) for pid, at, bt in proc_tuples]
+        processors = [
+            Processor(cid, CoreType.P_CORE if ctype == "P" else CoreType.E_CORE)
+            for cid, ctype in core_tuples
+        ]
+        scheduler = SCHEDULER_MAP[algo_name](quantum)
+        report = self.simulator.run(scheduler, processes, processors)
+
+        process_ids = [p["pid"] for p in report["processes"]]
+        self.gantt_chart.set_data(report["timeline"], report["total_time"], process_ids)
+        self.result_table.update_results(report)
+```
+
+- [ ] **Step 4: 수동 실행 확인**
+
+Run: `cd ~/development/process-scheduling-simulator/src && python main.py`
+Expected: 코어 설정 라디오 버튼(OFF/P-Core/E-Core) 4개, 무작위 추가 버튼, 15개 제한 동작.
+
+- [ ] **Step 5: 커밋**
+
+```bash
+cd ~/development/process-scheduling-simulator
+git add src/gui/processor_config.py src/gui/process_input.py src/gui/main_window.py
+git commit -m "feat: add processor config panel with P/E core selection and process limits"
+```
+
+---
+
+## Task 23: GUI — Ready Queue 시각화
+
+**Files:**
+- Create: `src/gui/ready_queue_view.py`
+- Modify: `src/gui/main_window.py`
+
+- [ ] **Step 1: Ready Queue 위젯 작성**
+
+```python
+# src/gui/ready_queue_view.py
+from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel, QFrame
+from PyQt5.QtCore import Qt, QRectF
+from PyQt5.QtGui import QPainter, QColor, QFont
+
+
+QUEUE_COLORS = [
+    "#f38ba8", "#fab387", "#f9e2af", "#a6e3a1",
+    "#89dceb", "#89b4fa", "#cba6f7", "#f5c2e7",
+    "#94e2d5", "#eba0ac", "#74c7ec", "#b4befe",
+    "#f38ba8", "#fab387", "#f9e2af",
+]
+
+
+class ReadyQueueView(QWidget):
+    """Ready Queue 상태를 시각적으로 표시하는 위젯"""
+
+    def __init__(self):
+        super().__init__()
+        self.queue_pids: list[str] = []
+        self.color_map: dict[str, QColor] = {}
+        self.setFixedHeight(50)
+        self.setMinimumWidth(200)
+
+    def set_color_map(self, color_map: dict[str, QColor]):
+        self.color_map = color_map
+
+    def update_queue(self, pids: list[str]):
+        """현재 Ready Queue 상태 업데이트"""
+        self.queue_pids = pids
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        font = QFont("Segoe UI", 10, QFont.Bold)
+        painter.setFont(font)
+
+        x = 10
+        block_h = 30
+        y = (self.height() - block_h) // 2
+
+        # "Ready Queue:" 라벨
+        painter.setPen(QColor("#cdd6f4"))
+        painter.drawText(QRectF(x, y, 100, block_h), Qt.AlignVCenter, "Ready Queue:")
+        x += 105
+
+        if not self.queue_pids:
+            painter.setPen(QColor("#6c7086"))
+            painter.drawText(QRectF(x, y, 100, block_h), Qt.AlignVCenter, "(비어있음)")
+            painter.end()
+            return
+
+        block_w = 50
+        for pid in self.queue_pids:
+            color = self.color_map.get(pid, QColor("#89b4fa"))
+            painter.setBrush(color)
+            painter.setPen(Qt.NoPen)
+            painter.drawRoundedRect(QRectF(x, y, block_w, block_h), 4, 4)
+
+            painter.setPen(QColor("#1e1e2e"))
+            painter.drawText(QRectF(x, y, block_w, block_h), Qt.AlignCenter, pid)
+            x += block_w + 4
+
+            if x + block_w > self.width():
+                break
+
+        painter.end()
+```
+
+- [ ] **Step 2: MainWindow에 Ready Queue 위젯 추가**
+
+`src/gui/main_window.py`에서 Gantt 차트와 결과 테이블 사이에 Ready Queue 뷰 삽입:
+
+import 추가:
+```python
+from gui.ready_queue_view import ReadyQueueView
+```
+
+`__init__`에서 gantt_group 아래에:
+```python
+        # Ready Queue
+        self.ready_queue_view = ReadyQueueView()
+        right_layout.addWidget(self.ready_queue_view)
+```
+
+Gantt 애니메이션 tick과 연동하여 해당 시점의 ready queue 상태를 표시하려면, ScheduleResult에 ready queue 스냅샷을 포함하거나 GUI에서 재계산. 기본 구현은 정적으로 비워두고, 애니메이션 연동은 후속 개선.
+
+- [ ] **Step 3: 수동 실행 확인**
+
+Run: `cd ~/development/process-scheduling-simulator/src && python main.py`
+Expected: Gantt 차트 아래에 Ready Queue 시각화 영역 표시.
+
+- [ ] **Step 4: 커밋**
+
+```bash
+cd ~/development/process-scheduling-simulator
+git add src/gui/ready_queue_view.py src/gui/main_window.py
+git commit -m "feat: add Ready Queue visualization widget"
+```
+
+---
+
+## Task 24: GUI — Gantt 차트 멀티코어 표시 + 결과 테이블 전력 표시
+
+**Files:**
+- Modify: `src/gui/gantt_chart.py`
+- Modify: `src/gui/result_table.py`
+
+- [ ] **Step 1: Gantt 차트에 코어별 행 표시**
+
+`src/gui/gantt_chart.py`의 `GanttCanvas.set_data`를 수정하여 코어별 행을 표시:
+
+```python
+    def set_data(self, timeline: list[TimeSlot], total_time: int, process_ids: list[str],
+                 core_ids: list[int] | None = None):
+        self.timeline = timeline
+        self.total_time = total_time
+        self.process_ids = [pid for pid in process_ids if pid != "idle"]
+        self.color_map = {}
+        for i, pid in enumerate(self.process_ids):
+            self.color_map[pid] = QColor(PROCESS_COLORS[i % len(PROCESS_COLORS)])
+
+        # 멀티코어: 코어별 행 사용
+        if core_ids and len(core_ids) > 1:
+            self.row_mode = "core"
+            self.core_ids = core_ids
+        else:
+            self.row_mode = "process"
+            self.core_ids = [0]
+
+        self.has_idle = any(slot.pid == "idle" for slot in timeline)
+        self.animated_time = 0
+        self.update()
+```
+
+`paintEvent`에서 `self.row_mode == "core"`일 때 행을 코어 ID 기준으로 그리기:
+- 행 라벨: "Core 0 (E)", "Core 1 (P)" 등
+- 각 TimeSlot을 해당 core_id 행에 배치
+- 프로세스는 색상으로 구분
+
+- [ ] **Step 2: 결과 테이블에 전력 정보 표시**
+
+`src/gui/result_table.py`의 `update_results`에 전력 요약 추가:
+
+```python
+    def update_results(self, report: dict):
+        # ... 기존 테이블 로직 ...
+
+        # 전력 정보
+        power = report.get("power")
+        if power:
+            self.power_label.setText(f"총 소비전력: {power['total_power']}W")
+            core_texts = []
+            for c in power["cores"]:
+                core_texts.append(
+                    f"Core {c['core_id']}({c['core_type']}): {c['power']}W, 가동률 {c['utilization']}%"
+                )
+            self.core_detail_label.setText("  |  ".join(core_texts))
+        else:
+            self.power_label.setText("총 소비전력: -")
+            self.core_detail_label.setText("")
+```
+
+`__init__`에 전력 라벨 추가:
+```python
+        self.power_label = QLabel("총 소비전력: -")
+        self.power_label.setStyleSheet("font-weight: bold; font-size: 14px; padding: 4px 12px; color: #f9e2af;")
+        avg_layout.addWidget(self.power_label)
+
+        self.core_detail_label = QLabel("")
+        self.core_detail_label.setStyleSheet("font-size: 11px; padding: 4px 12px; color: #6c7086;")
+        layout.addWidget(self.core_detail_label)
+```
+
+- [ ] **Step 3: MainWindow에서 코어 ID 전달**
+
+`_on_run`에서 Gantt 차트에 코어 ID 전달:
+```python
+        core_ids = [cid for cid, _ in core_tuples]
+        self.gantt_chart.set_data(report["timeline"], report["total_time"], process_ids, core_ids)
+```
+
+- [ ] **Step 4: 수동 실행 확인**
+
+Run: `cd ~/development/process-scheduling-simulator/src && python main.py`
+Expected: 2코어 이상 설정 시 Gantt 차트가 코어별 행으로 표시. 결과 테이블 하단에 총 소비전력 + 코어별 전력/가동률 표시.
+
+- [ ] **Step 5: 커밋**
+
+```bash
+cd ~/development/process-scheduling-simulator
+git add src/gui/gantt_chart.py src/gui/result_table.py src/gui/main_window.py
+git commit -m "feat: add multi-core Gantt chart rows and power display in result table"
+```
+
+---
+
+## Task 25: 최종 통합 테스트 + 실행 파일 패키징
+
+**Files:**
+- Modify: `requirements.txt`
+
+- [ ] **Step 1: requirements.txt에 pyinstaller 추가**
+
+```
+PyQt5>=5.15
+pytest>=7.0
+pyinstaller>=6.0
+```
+
+- [ ] **Step 2: 전체 테스트 실행**
+
+Run: `cd ~/development/process-scheduling-simulator && python -m pytest tests/ -v`
+Expected: ALL passed
+
+- [ ] **Step 3: GUI 전체 검증**
+
+Run: `cd ~/development/process-scheduling-simulator/src && python main.py`
+확인 사항:
+1. 프로세스 추가/삭제/무작위 추가 (15개 제한)
+2. 프로세서 설정 (P core/E core/OFF, 최대 4코어)
+3. 각 알고리즘별 실행 → 코어별 Gantt 차트 + 결과 테이블 + 전력 표시
+4. 애니메이션 재생/일시정지/리셋
+5. Ready Queue 시각화
+6. "전체 비교" → 6개 알고리즘 비교 뷰 (공유 시간축)
+7. 다크 테마 적용
+
+- [ ] **Step 4: 실행 파일 빌드 (Windows 제출용)**
+
+Run: `cd ~/development/process-scheduling-simulator && pyinstaller --onefile --windowed --name "ProcessSchedulingSimulator" src/main.py`
+Expected: `dist/ProcessSchedulingSimulator.exe` 생성
+
+- [ ] **Step 5: 커밋**
+
+```bash
+cd ~/development/process-scheduling-simulator
+git add requirements.txt
+git commit -m "feat: add pyinstaller for executable packaging"
 ```

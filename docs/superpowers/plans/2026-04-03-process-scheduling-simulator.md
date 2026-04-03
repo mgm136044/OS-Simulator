@@ -1586,8 +1586,7 @@ class ProcessInputPanel(QWidget):
         for col, val in enumerate([pid, str(at), str(bt)]):
             item = QTableWidgetItem(val)
             item.setTextAlignment(Qt.AlignCenter)
-            if col == 0:
-                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             self.table.setItem(row, col, item)
 
     def _delete_selected(self):
@@ -1854,6 +1853,8 @@ class GanttCanvas(QWidget):
         self.color_map = {}
         for i, pid in enumerate(self.process_ids):
             self.color_map[pid] = QColor(PROCESS_COLORS[i % len(PROCESS_COLORS)])
+        # idle 여부 확인
+        self.has_idle = any(slot.pid == "idle" for slot in timeline)
         self.animated_time = 0
         self.update()
 
@@ -1885,11 +1886,42 @@ class GanttCanvas(QWidget):
             painter.drawText(QRectF(0, y, left_margin - 10, row_height),
                              Qt.AlignVCenter | Qt.AlignRight, pid)
 
+        # idle 행 (있으면 최하단에 표시)
+        idle_row = len(self.process_ids) if self.has_idle else -1
+        if self.has_idle:
+            y = top_margin + idle_row * row_height
+            painter.setPen(QColor("#6c7086"))
+            painter.drawText(QRectF(0, y, left_margin - 10, row_height),
+                             Qt.AlignVCenter | Qt.AlignRight, "idle")
+
         # 타임라인 바 그리기
         for slot in self.timeline:
-            if slot.pid == "idle" or slot.pid not in self.color_map:
-                continue
             if slot.start >= self.animated_time:
+                continue
+
+            if slot.pid == "idle":
+                if not self.has_idle:
+                    continue
+                row = idle_row
+                y = top_margin + row * row_height + 4
+                visible_end = min(slot.end, self.animated_time)
+                x = left_margin + slot.start * unit_width
+                bar_w = (visible_end - slot.start) * unit_width
+                # idle은 빗금 패턴의 회색 블록으로 표시
+                idle_color = QColor("#45475a")
+                painter.setBrush(idle_color)
+                painter.setPen(QPen(QColor("#6c7086"), 1, Qt.DashLine))
+                painter.drawRoundedRect(QRectF(x, y, bar_w, row_height - 8), 4, 4)
+                if bar_w > 20:
+                    painter.setPen(QColor("#cdd6f4"))
+                    small_font = QFont("Segoe UI", 8)
+                    painter.setFont(small_font)
+                    painter.drawText(QRectF(x, y, bar_w, row_height - 8),
+                                     Qt.AlignCenter, f"idle")
+                    painter.setFont(font)
+                continue
+
+            if slot.pid not in self.color_map:
                 continue
 
             row = self.process_ids.index(slot.pid)
@@ -1913,7 +1945,8 @@ class GanttCanvas(QWidget):
                 painter.setFont(font)
 
         # 시간 축
-        axis_y = top_margin + len(self.process_ids) * row_height + 4
+        total_rows = len(self.process_ids) + (1 if self.has_idle else 0)
+        axis_y = top_margin + total_rows * row_height + 4
         painter.setPen(QColor("#6c7086"))
         small_font = QFont("Segoe UI", 8)
         painter.setFont(small_font)
@@ -2113,16 +2146,20 @@ class ComparisonView(QWidget):
         self.layout.addWidget(summary_group)
         self._widgets.append(summary_group)
 
+        # 공유 시간 축: 모든 알고리즘 중 가장 긴 makespan을 기준으로 통일
+        shared_total_time = max(r["total_time"] for r in reports)
+
         # 각 알고리즘별 미니 Gantt 차트
         for report in reports:
-            group = QGroupBox(report["algorithm"])
+            group = QGroupBox(f"{report['algorithm']}  (makespan: {report['total_time']})")
             group_layout = QVBoxLayout(group)
             canvas = GanttCanvas()
             canvas.setMinimumHeight(120)
             canvas.setMaximumHeight(160)
             process_ids = [p["pid"] for p in report["processes"]]
-            canvas.set_data(report["timeline"], report["total_time"], process_ids)
-            canvas.set_animated_time(report["total_time"])
+            # 공유 시간 축 사용: 모든 차트가 동일한 스케일로 렌더링
+            canvas.set_data(report["timeline"], shared_total_time, process_ids)
+            canvas.set_animated_time(shared_total_time)
             group_layout.addWidget(canvas)
             self.layout.addWidget(group)
             self._widgets.append(group)

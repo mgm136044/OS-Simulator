@@ -1570,9 +1570,15 @@ class ProcessInputPanel(QWidget):
         layout.addWidget(self.table)
 
         # 삭제 버튼
+        del_layout = QHBoxLayout()
         self.del_btn = QPushButton("선택 삭제")
         self.del_btn.clicked.connect(self._delete_selected)
-        layout.addWidget(self.del_btn)
+        del_layout.addWidget(self.del_btn)
+
+        self.clear_btn = QPushButton("전체 제거")
+        self.clear_btn.clicked.connect(self._clear_all)
+        del_layout.addWidget(self.clear_btn)
+        layout.addLayout(del_layout)
 
         # 실행 버튼
         self.run_btn = QPushButton("▶  실행")
@@ -1606,6 +1612,10 @@ class ProcessInputPanel(QWidget):
         rows = sorted(set(idx.row() for idx in self.table.selectedIndexes()), reverse=True)
         for row in rows:
             self.table.removeRow(row)
+
+    def _clear_all(self):
+        self.table.setRowCount(0)
+        self._process_count = 0
 
     def _on_run(self):
         if self.table.rowCount() == 0:
@@ -3447,37 +3457,129 @@ git commit -m "feat: add Ready Queue visualization widget"
 - Modify: `src/gui/gantt_chart.py`
 - Modify: `src/gui/result_table.py`
 
-- [ ] **Step 1: Gantt 차트에 코어별 행 표시**
+- [ ] **Step 1: Gantt 차트를 프로세스별 + 코어별 동시 표시로 변경**
 
-`src/gui/gantt_chart.py`의 `GanttCanvas.set_data`를 수정하여 코어별 행을 표시:
+참조 이미지처럼 상단에 "프로세스 관리"(프로세스별 Gantt), 하단에 "스케줄링 결과"(코어별 Gantt)를 동시 표시.
+
+`src/gui/gantt_chart.py`의 `GanttChart` 위젯을 두 개의 `GanttCanvas`를 포함하도록 변경:
+
+```python
+class GanttChart(QWidget):
+    """Gantt 차트 위젯: 프로세스별 + 코어별 동시 표시"""
+
+    def __init__(self):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # 상단: 프로세스별 Gantt (프로세스 관리)
+        proc_group = QGroupBox("프로세스 관리")
+        proc_layout = QVBoxLayout(proc_group)
+        scroll1 = QScrollArea()
+        scroll1.setWidgetResizable(True)
+        self.process_canvas = GanttCanvas()
+        scroll1.setWidget(self.process_canvas)
+        proc_layout.addWidget(scroll1)
+        layout.addWidget(proc_group, stretch=1)
+
+        # 하단: 코어별 Gantt (스케줄링 결과)
+        core_group = QGroupBox("스케줄링 결과")
+        core_layout = QVBoxLayout(core_group)
+        scroll2 = QScrollArea()
+        scroll2.setWidgetResizable(True)
+        self.core_canvas = GanttCanvas()
+        scroll2.setWidget(self.core_canvas)
+        core_layout.addWidget(scroll2)
+        layout.addWidget(core_group, stretch=1)
+
+        # 컨트롤 버튼
+        ctrl_layout = QHBoxLayout()
+        self.play_btn = QPushButton("▶ 재생")
+        self.play_btn.clicked.connect(self._toggle_play)
+        ctrl_layout.addWidget(self.play_btn)
+
+        self.reset_btn = QPushButton("↺ 리셋")
+        self.reset_btn.clicked.connect(self._reset)
+        ctrl_layout.addWidget(self.reset_btn)
+
+        self.skip_btn = QPushButton("⏩ 전체 보기")
+        self.skip_btn.clicked.connect(self._skip_to_end)
+        ctrl_layout.addWidget(self.skip_btn)
+
+        ctrl_layout.addStretch()
+        layout.addLayout(ctrl_layout)
+
+        # 타이머
+        self.timer = QTimer()
+        self.timer.setInterval(400)
+        self.timer.timeout.connect(self._tick)
+        self._playing = False
+```
+
+`set_data`에서 두 캔버스를 동시에 설정:
 
 ```python
     def set_data(self, timeline: list[TimeSlot], total_time: int, process_ids: list[str],
-                 core_ids: list[int] | None = None):
-        self.timeline = timeline
-        self.total_time = total_time
-        self.process_ids = [pid for pid in process_ids if pid != "idle"]
-        self.color_map = {}
-        for i, pid in enumerate(self.process_ids):
-            self.color_map[pid] = QColor(PROCESS_COLORS[i % len(PROCESS_COLORS)])
+                 core_ids: list[int] | None = None, core_types: list[str] | None = None):
+        self.timer.stop()
+        self._playing = False
+        self.play_btn.setText("▶ 재생")
 
-        # 멀티코어: 코어별 행 사용
-        if core_ids and len(core_ids) > 1:
-            self.row_mode = "core"
-            self.core_ids = core_ids
+        # 프로세스별 캔버스: 기존 방식 (프로세스 행)
+        self.process_canvas.row_mode = "process"
+        self.process_canvas.set_data(timeline, total_time, process_ids)
+
+        # 코어별 캔버스: 코어 행으로 표시
+        if core_ids and len(core_ids) >= 1:
+            self.core_canvas.row_mode = "core"
+            self.core_canvas.core_ids = core_ids
+            self.core_canvas.core_types = core_types or ["E"] * len(core_ids)
+            self.core_canvas.set_data(timeline, total_time, process_ids)
         else:
-            self.row_mode = "process"
-            self.core_ids = [0]
+            self.core_canvas.row_mode = "core"
+            self.core_canvas.core_ids = [0]
+            self.core_canvas.core_types = ["E"]
+            self.core_canvas.set_data(timeline, total_time, process_ids)
 
-        self.has_idle = any(slot.pid == "idle" for slot in timeline)
-        self.animated_time = 0
-        self.update()
+        self._skip_to_end()
 ```
 
-`paintEvent`에서 `self.row_mode == "core"`일 때 행을 코어 ID 기준으로 그리기:
-- 행 라벨: "Core 0 (E)", "Core 1 (P)" 등
+`_tick`, `_reset`, `_skip_to_end`에서 두 캔버스 동시 업데이트:
+
+```python
+    def _tick(self):
+        t = self.process_canvas.animated_time + 1
+        total = self.process_canvas.total_time
+        if t > total:
+            t = total
+            self.timer.stop()
+            self._playing = False
+            self.play_btn.setText("▶ 재생")
+        self.process_canvas.set_animated_time(t)
+        self.core_canvas.set_animated_time(t)
+
+    def _reset(self):
+        self.timer.stop()
+        self._playing = False
+        self.play_btn.setText("▶ 재생")
+        self.process_canvas.set_animated_time(0)
+        self.core_canvas.set_animated_time(0)
+
+    def _skip_to_end(self):
+        self.timer.stop()
+        self._playing = False
+        self.play_btn.setText("▶ 재생")
+        self.process_canvas.set_animated_time(self.process_canvas.total_time)
+        self.core_canvas.set_animated_time(self.core_canvas.total_time)
+```
+
+`GanttCanvas.paintEvent`에서 `self.row_mode == "core"`일 때:
+- 행 라벨: "Core 0 (E)", "Core 1 (P)" 등 (core_types 사용)
 - 각 TimeSlot을 해당 core_id 행에 배치
 - 프로세스는 색상으로 구분
+
+`self.row_mode == "process"`일 때:
+- 기존 동작: 프로세스별 행에 해당 프로세스의 실행 구간 표시
 
 - [ ] **Step 2: 결과 테이블에 전력 정보 표시**
 
@@ -3487,9 +3589,24 @@ git commit -m "feat: add Ready Queue visualization widget"
     def update_results(self, report: dict):
         # ... 기존 테이블 로직 ...
 
-        # 전력 정보
+        # 프로세서 개요 + 전력 정보
         power = report.get("power")
         if power:
+            p_cores = [c for c in power["cores"] if c["core_type"] == "P"]
+            e_cores = [c for c in power["cores"] if c["core_type"] == "E"]
+            p_power = sum(c["power"] for c in p_cores)
+            e_power = sum(c["power"] for c in e_cores)
+
+            self.p_core_label.setText(f"성능(P): {len(p_cores)}개  ⚡{p_power}W")
+            self.e_core_label.setText(f"효율(E): {len(e_cores)}개  ⚡{e_power}W")
+            self.total_tasks_label.setText(f"처리 작업: {len(procs)}개")
+            self.total_time_label.setText(f"전체 수행시간: {report['total_time']}초")
+
+            # 평균 가동률
+            utils = [c["utilization"] for c in power["cores"]]
+            avg_util = round(sum(utils) / len(utils), 1) if utils else 0.0
+            self.avg_util_label.setText(f"평균 가동률: {avg_util}%")
+
             self.power_label.setText(f"총 소비전력: {power['total_power']}W")
             core_texts = []
             for c in power["cores"]:
@@ -3498,12 +3615,31 @@ git commit -m "feat: add Ready Queue visualization widget"
                 )
             self.core_detail_label.setText("  |  ".join(core_texts))
         else:
+            self.p_core_label.setText("성능(P): -")
+            self.e_core_label.setText("효율(E): -")
+            self.total_tasks_label.setText(f"처리 작업: {len(procs)}개")
+            self.total_time_label.setText(f"전체 수행시간: {report['total_time']}초")
+            self.avg_util_label.setText("평균 가동률: -")
             self.power_label.setText("총 소비전력: -")
             self.core_detail_label.setText("")
 ```
 
-`__init__`에 전력 라벨 추가:
+`__init__`에 프로세서 개요 + 전력 라벨 추가:
 ```python
+        # 프로세서 개요 섹션
+        overview_layout = QHBoxLayout()
+        self.p_core_label = QLabel("성능(P): -")
+        self.e_core_label = QLabel("효율(E): -")
+        self.total_tasks_label = QLabel("처리 작업: -")
+        self.total_time_label = QLabel("전체 수행시간: -")
+        self.avg_util_label = QLabel("평균 가동률: -")
+        for label in (self.p_core_label, self.e_core_label, self.total_tasks_label,
+                       self.total_time_label, self.avg_util_label):
+            label.setStyleSheet("font-size: 12px; padding: 2px 8px;")
+            overview_layout.addWidget(label)
+        overview_layout.addStretch()
+        layout.addLayout(overview_layout)
+
         self.power_label = QLabel("총 소비전력: -")
         self.power_label.setStyleSheet("font-weight: bold; font-size: 14px; padding: 4px 12px; color: #f9e2af;")
         avg_layout.addWidget(self.power_label)
@@ -3515,16 +3651,24 @@ git commit -m "feat: add Ready Queue visualization widget"
 
 - [ ] **Step 3: MainWindow에서 코어 ID 전달**
 
-`_on_run`에서 Gantt 차트에 코어 ID 전달:
+`_on_run`에서 Gantt 차트에 코어 ID + 타입 전달:
 ```python
         core_ids = [cid for cid, _ in core_tuples]
-        self.gantt_chart.set_data(report["timeline"], report["total_time"], process_ids, core_ids)
+        core_types = [ctype for _, ctype in core_tuples]
+        self.gantt_chart.set_data(
+            report["timeline"], report["total_time"], process_ids,
+            core_ids, core_types
+        )
 ```
 
 - [ ] **Step 4: 수동 실행 확인**
 
 Run: `cd ~/development/process-scheduling-simulator/src && python main.py`
-Expected: 2코어 이상 설정 시 Gantt 차트가 코어별 행으로 표시. 결과 테이블 하단에 총 소비전력 + 코어별 전력/가동률 표시.
+Expected:
+- 상단 "프로세스 관리" Gantt: 프로세스별 행으로 실행 구간 표시
+- 하단 "스케줄링 결과" Gantt: 코어별 행(Core 0 (E), Core 1 (P)...)으로 표시
+- 프로세서 개요: 성능/효율 코어 수, 전력, 처리 작업 수, 전체 수행시간, 평균 가동률
+- 결과 테이블 하단에 총 소비전력 + 코어별 전력/가동률 표시
 
 - [ ] **Step 5: 커밋**
 

@@ -1,12 +1,19 @@
 from models.process import Process
+from models.processor import Processor
 from schedulers.base import BaseScheduler
+from engine.power import calc_power_summary
 
 
 class Simulator:
 
-    def run(self, scheduler: BaseScheduler, processes: list[Process]) -> dict:
+    def run(
+        self,
+        scheduler: BaseScheduler,
+        processes: list[Process],
+        processors: list[Processor] | None = None,
+    ) -> dict:
         """스케줄러 실행 후 리포트 딕셔너리 반환"""
-        result = scheduler.schedule(processes)
+        result = scheduler.schedule(processes, processors)
 
         process_details = []
         for p in processes:
@@ -25,6 +32,10 @@ class Simulator:
         avg_tt = sum(p.turnaround_time for p in processes) / n if n else 0
         avg_ntt = sum(p.ntt for p in processes) / n if n else 0
 
+        power_summary = None
+        if processors is not None:
+            power_summary = calc_power_summary(processors, result.timeline, result.total_time)
+
         return {
             "algorithm": scheduler.name,
             "total_time": result.total_time,
@@ -35,4 +46,5 @@ class Simulator:
                 "avg_tt": round(avg_tt, 2),
                 "avg_ntt": round(avg_ntt, 2),
             },
+            "power": power_summary,
         }

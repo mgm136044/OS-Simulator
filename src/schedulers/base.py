@@ -5,10 +5,11 @@ from typing import Optional
 
 @dataclass
 class TimeSlot:
-    """Gantt 차트 한 칸: 어떤 프로세스가 언제부터 언제까지 실행되었는지"""
+    """Gantt 차트 한 칸: 어떤 프로세스가 어느 코어에서 언제부터 언제까지 실행되었는지"""
     pid: str          # 프로세스 ID ("idle" for idle)
     start: int
     end: int
+    core_id: int = 0  # 코어 ID (단일코어는 0)
 
 
 @dataclass
@@ -16,6 +17,7 @@ class ScheduleResult:
     """스케줄링 결과"""
     timeline: list[TimeSlot] = field(default_factory=list)
     total_time: int = 0
+    total_power: float = 0.0
 
 
 class BaseScheduler(ABC):
@@ -28,10 +30,9 @@ class BaseScheduler(ABC):
         ...
 
     @abstractmethod
-    def schedule(self, processes: list) -> ScheduleResult:
+    def schedule(self, processes: list, processors: list | None = None) -> ScheduleResult:
         """
         프로세스 리스트를 받아 스케줄링 실행.
-        - 각 프로세스의 WT, TT, CT 필드를 업데이트
-        - ScheduleResult (타임라인) 반환
+        processors가 None이면 E core 1개로 동작 (하위호환).
         """
         ...

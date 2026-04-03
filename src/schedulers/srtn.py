@@ -8,7 +8,7 @@ class SRTNScheduler(BaseScheduler):
     def name(self) -> str:
         return "SRTN"
 
-    def schedule(self, processes: list[Process]) -> ScheduleResult:
+    def schedule(self, processes: list[Process], processors=None) -> ScheduleResult:
         for p in processes:
             p.reset()
 

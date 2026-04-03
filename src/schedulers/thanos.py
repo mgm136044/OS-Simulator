@@ -12,7 +12,7 @@ class ThanosScheduler(BaseScheduler):
     def name(self) -> str:
         return "Thanos"
 
-    def schedule(self, processes: list[Process]) -> ScheduleResult:
+    def schedule(self, processes: list[Process], processors=None) -> ScheduleResult:
         for p in processes:
             p.reset()
 

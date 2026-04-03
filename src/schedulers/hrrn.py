@@ -8,7 +8,7 @@ class HRRNScheduler(BaseScheduler):
     def name(self) -> str:
         return "HRRN"
 
-    def schedule(self, processes: list[Process]) -> ScheduleResult:
+    def schedule(self, processes: list[Process], processors=None) -> ScheduleResult:
         for p in processes:
             p.reset()
 

@@ -81,22 +81,29 @@ GanttChart + ResultTable + ReadyQueueView (GUI 출력)
 ```python
 @dataclass
 class Process:
-    pid: str                # 프로세스 ID
-    arrival_time: int       # 도착 시간
-    burst_time: int         # 실행 시간
-    remaining_time: int     # 잔여 실행 시간 (초기값 = burst_time)
-    waiting_time: int       # 대기 시간
-    turnaround_time: int    # 반환 시간 (CT - AT)
-    completion_time: int    # 완료 시간
+    pid: str                          # 프로세스 ID
+    arrival_time: int                 # 도착 시간
+    burst_time: int                   # 실행 시간
+    remaining_time: int = field(init=False)  # 잔여 시간 (__post_init__에서 burst_time으로 초기화)
+    waiting_time: int = 0             # 대기 시간
+    turnaround_time: int = 0          # 반환 시간 (CT - AT)
+    completion_time: int = 0          # 완료 시간
+
+    def __post_init__(self):
+        self.remaining_time = self.burst_time
 
     @property
     def ntt(self) -> float:
         """Normalized Turnaround Time = TT / BT"""
+        if self.burst_time == 0:
+            return 0.0
         return self.turnaround_time / self.burst_time
 
     def reset(self):
         """스케줄러 재실행 시 메트릭 초기화"""
 ```
+
+`remaining_time`은 `field(init=False)`로 선언되어 생성자 파라미터가 아니며, `__post_init__`에서 `burst_time`으로 자동 초기화된다. `ntt`는 `burst_time == 0`인 경우를 방어한다.
 
 `reset()` 메서드를 통해 동일한 프로세스 객체를 여러 알고리즘에서 재사용할 수 있다. 이는 전체 비교 기능에서 핵심적으로 활용된다.
 
@@ -124,6 +131,7 @@ def assign(self, pid: str):
         self._needs_startup = True  # 시동전력 발생
     self.current_process = pid
     self.is_idle = False
+    self._had_idle_tick = False    # 연속 재배정 시 시동전력 방지
 
 def tick(self) -> float:
     if self.is_idle:
@@ -158,6 +166,12 @@ class ScheduleResult:
     queue_snapshots: dict       # Ready Queue 상태 ({time: [pid, ...]})
 
 class BaseScheduler(ABC):
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """스케줄러 이름 (예: 'FCFS', 'RR')"""
+        ...
+
     @abstractmethod
     def schedule(self, processes, processors=None) -> ScheduleResult:
         ...
@@ -230,7 +244,7 @@ if shortest.remaining_time < proc.remaining_time:
 
 ```python
 def response_ratio(p):
-    wt = current_time - p.arrival_time
+    wt = earliest_free - p.arrival_time  # 가장 먼저 비는 코어 시각 기준
     return (wt + p.burst_time) / p.burst_time
 
 proc = max(available, key=lambda p: (response_ratio(p), -p.arrival_time))
@@ -359,7 +373,7 @@ if state["quantum_used"] >= self.time_quantum:
 - **기아 방지**: RR 기반이므로 모든 프로세스가 반드시 CPU 시간을 할당받음
 - **진행률 기반 최적화**: 절반 이상 완료된 프로세스를 우선 마무리하여 평균 TT 개선
 - **매몰 비용 감소**: 거의 완료된 작업이 타임아웃되는 상황을 방지
-- **예측 불필요**: SPN/SRTN과 달리 BT 사전 정보 불필요 — 실행 중 관측만으로 부스트 판단
+- **스케줄링 순서에 BT 불필요**: SPN/SRTN은 BT로 실행 순서를 결정하지만, Thanos는 RR 기반으로 실행 순서를 정하고 부스트 판정에만 BT를 참조. 스케줄링 진입 시점에 BT 예측이 필요 없다.
 
 ---
 
@@ -389,12 +403,12 @@ _(스크린샷 삽입 위치 — 한컴 편집 시 추가)_
 
 | 알고리즘 | Avg WT | Avg TT | Avg NTT | Makespan |
 |---------|:------:|:------:|:-------:|:--------:|
-| FCFS | 3.00 | 6.50 | 1.93 | 14 |
-| RR | 3.25 | 6.75 | 1.96 | 14 |
-| SPN | 2.00 | 5.50 | 1.50 | 14 |
-| SRTN | 2.00 | 5.50 | 1.50 | 14 |
-| HRRN | 3.00 | 6.50 | 1.93 | 14 |
-| Thanos | 3.00 | 6.50 | 1.89 | 14 |
+| FCFS | 3.00 | 6.50 | 2.04 | 14 |
+| RR | 3.75 | 7.25 | 2.03 | 14 |
+| SPN | 2.00 | 5.50 | 1.40 | 14 |
+| SRTN | 2.00 | 5.50 | 1.40 | 14 |
+| HRRN | 3.00 | 6.50 | 2.04 | 14 |
+| Thanos | 3.00 | 6.50 | 1.78 | 14 |
 
 ### 3. 멀티코어 실행 결과
 

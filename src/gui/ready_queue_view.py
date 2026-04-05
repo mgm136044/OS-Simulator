@@ -11,7 +11,7 @@ class ReadyQueueView(QWidget):
         self.queue_pids: list[str] = []
         self.color_map: dict[str, QColor] = {}
         self.setFixedHeight(50)
-        self.setMinimumWidth(200)
+        self.setMinimumWidth(350)
 
     def set_color_map(self, color_map: dict[str, QColor]):
         self.color_map = color_map
@@ -30,13 +30,16 @@ class ReadyQueueView(QWidget):
         block_h = 30
         y = (self.height() - block_h) // 2
 
+        label = "Ready Queue:"
+        fm = painter.fontMetrics()
+        label_w = fm.horizontalAdvance(label) + 10
         painter.setPen(QColor("#cdd6f4"))
-        painter.drawText(QRectF(x, y, 100, block_h), Qt.AlignVCenter, "Ready Queue:")
-        x += 105
+        painter.drawText(QRectF(x, y, label_w, block_h), Qt.AlignVCenter | Qt.TextDontClip, label)
+        x += label_w + 5
 
         if not self.queue_pids:
             painter.setPen(QColor("#6c7086"))
-            painter.drawText(QRectF(x, y, 100, block_h), Qt.AlignVCenter, "(비어있음)")
+            painter.drawText(QRectF(x, y, 100, block_h), Qt.AlignVCenter | Qt.TextDontClip, "(비어있음)")
             painter.end()
             return
 

@@ -30,6 +30,7 @@ class SRTNScheduler(BaseScheduler):
         total_power = 0.0
 
         core_state: list[dict | None] = [None] * num_cores
+        queue_snapshots: dict = {}
 
         while idx < n and sorted_procs[idx].arrival_time <= current_time:
             ready_queue.append(sorted_procs[idx])
@@ -100,6 +101,9 @@ class SRTNScheduler(BaseScheduler):
                     core_state[ci] = None
                     completed += 1
 
+            queue_snapshots[current_time] = [p.pid for p in ready_queue]
+
         total_time = current_time
         timeline.sort(key=lambda s: (s.core_id, s.start))
-        return ScheduleResult(timeline=timeline, total_time=total_time, total_power=round(total_power, 2))
+        return ScheduleResult(timeline=timeline, total_time=total_time, total_power=round(total_power, 2),
+                              queue_snapshots=queue_snapshots)

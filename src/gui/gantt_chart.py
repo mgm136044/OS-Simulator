@@ -31,6 +31,11 @@ class GanttCanvas(QWidget):
             self.color_map[pid] = QColor(PROCESS_COLORS[i % len(PROCESS_COLORS)])
         self.has_idle = any(slot.pid == "idle" for slot in timeline)
         self.animated_time = 0
+
+        num_rows = len(self.process_ids) + (1 if self.has_idle else 0)
+        needed_h = 10 + num_rows * 35 + 30 + 10  # top_margin + rows + axis + buffer
+        self.setMinimumHeight(max(200, needed_h))
+
         self.update()
 
     def set_animated_time(self, t: int):

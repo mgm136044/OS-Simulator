@@ -54,4 +54,15 @@ class FCFSScheduler(BaseScheduler):
         total_time = max(core_free_at) if core_free_at else 0
         timeline.sort(key=lambda s: (s.core_id, s.start))
 
-        return ScheduleResult(timeline=timeline, total_time=total_time, total_power=round(total_power, 2))
+        # queue_snapshots: 슬롯 시작 + 프로세스 도착 시점마다 대기 중인 프로세스 기록
+        proc_start = {slot.pid: slot.start for slot in timeline}
+        event_times = sorted({slot.start for slot in timeline} | {p.arrival_time for p in processes})
+        queue_snapshots = {}
+        for t in event_times:
+            queue_snapshots[t] = [
+                p.pid for p in sorted(processes, key=lambda p: (p.arrival_time, p.pid))
+                if p.arrival_time <= t and proc_start.get(p.pid, t + 1) > t
+            ]
+
+        return ScheduleResult(timeline=timeline, total_time=total_time, total_power=round(total_power, 2),
+                              queue_snapshots=queue_snapshots)

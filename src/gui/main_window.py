@@ -97,9 +97,9 @@ class MainWindow(QMainWindow):
         splitter.addWidget(right_scroll)
         splitter.setSizes([350, 850])
 
-        # ReadyQueue 초기화 + timer 연결 (1회만, __init__에서)
+        # ReadyQueue 초기화 + 시간 변경 시그널 연결 (1회만, __init__에서)
         self._queue_snapshots = {}
-        self.gantt_chart.timer.timeout.connect(self._update_ready_queue)
+        self.gantt_chart.time_changed.connect(self._update_ready_queue)
 
     def _on_run(self, algo_name: str, quantum: int, proc_tuples: list, core_tuples: list):
         processes = [Process(pid, at, bt) for pid, at, bt in proc_tuples]
@@ -108,7 +108,8 @@ class MainWindow(QMainWindow):
         report = self.simulator.run(scheduler, processes, processors)
 
         process_ids = [p["pid"] for p in report["processes"]]
-        self.gantt_chart.set_data(report["timeline"], report["total_time"], process_ids)
+        configured_core_ids = [cid for cid, _ in core_tuples]
+        self.gantt_chart.set_data(report["timeline"], report["total_time"], process_ids, configured_core_ids)
         self.result_table.update_results(report)
 
         # ReadyQueueView 연결: queue_snapshots + 색상맵
@@ -129,9 +130,10 @@ class MainWindow(QMainWindow):
         self.comparison_view.set_results(reports)
         self.comparison_view.setVisible(True)
 
-    def _update_ready_queue(self):
+    def _update_ready_queue(self, t: int | None = None):
         """GanttChart의 현재 애니메이션 시각에 맞춰 ReadyQueueView 갱신"""
-        t = self.gantt_chart.canvas.animated_time
+        if t is None:
+            t = self.gantt_chart.canvas.animated_time
         snapshots = getattr(self, '_queue_snapshots', {})
         # 현재 시각 이하의 가장 가까운 snapshot
         pids = []

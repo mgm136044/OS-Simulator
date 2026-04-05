@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QPushButton, QVBoxLayout, QScrollArea
-from PyQt5.QtCore import Qt, QTimer, QRectF
+from PyQt5.QtCore import Qt, QTimer, QRectF, pyqtSignal
 from PyQt5.QtGui import QPainter, QColor, QFont, QPen
 from schedulers.base import TimeSlot
 
@@ -23,7 +23,8 @@ class GanttCanvas(QWidget):
         self.animated_time = 0
         self.setMinimumHeight(200)
 
-    def set_data(self, timeline: list[TimeSlot], total_time: int, process_ids: list[str]):
+    def set_data(self, timeline: list[TimeSlot], total_time: int, process_ids: list[str],
+                 configured_core_ids: list[int] | None = None):
         self.timeline = timeline
         self.total_time = total_time
         self.process_ids = [pid for pid in process_ids if pid != "idle"]
@@ -31,8 +32,11 @@ class GanttCanvas(QWidget):
         for i, pid in enumerate(self.process_ids):
             self.color_map[pid] = QColor(PROCESS_COLORS[i % len(PROCESS_COLORS)])
         self.has_idle = any(slot.pid == "idle" for slot in timeline)
-        # 코어 ID 추출
-        self.core_ids = sorted(set(slot.core_id for slot in timeline if slot.pid != "idle"))
+        # 코어 ID: 설정된 코어 목록 우선, 없으면 타임라인에서 추출
+        if configured_core_ids:
+            self.core_ids = sorted(configured_core_ids)
+        else:
+            self.core_ids = sorted(set(slot.core_id for slot in timeline if slot.pid != "idle"))
         if not self.core_ids:
             self.core_ids = [0]
         self.animated_time = 0
@@ -182,6 +186,8 @@ class GanttCanvas(QWidget):
 class GanttChart(QWidget):
     """Gantt 차트 위젯 (캔버스 + 애니메이션 컨트롤)"""
 
+    time_changed = pyqtSignal(int)  # 애니메이션 시간이 변경될 때마다 emit
+
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
@@ -214,11 +220,12 @@ class GanttChart(QWidget):
         self.timer.timeout.connect(self._tick)
         self._playing = False
 
-    def set_data(self, timeline: list[TimeSlot], total_time: int, process_ids: list[str]):
+    def set_data(self, timeline: list[TimeSlot], total_time: int, process_ids: list[str],
+                 configured_core_ids: list[int] | None = None):
         self.timer.stop()
         self._playing = False
         self.play_btn.setText("▶ 재생")
-        self.canvas.set_data(timeline, total_time, process_ids)
+        self.canvas.set_data(timeline, total_time, process_ids, configured_core_ids)
         self._skip_to_end()
 
     def _toggle_play(self):
@@ -241,15 +248,18 @@ class GanttChart(QWidget):
             self._playing = False
             self.play_btn.setText("▶ 재생")
         self.canvas.update()
+        self.time_changed.emit(self.canvas.animated_time)
 
     def _reset(self):
         self.timer.stop()
         self._playing = False
         self.play_btn.setText("▶ 재생")
         self.canvas.set_animated_time(0)
+        self.time_changed.emit(0)
 
     def _skip_to_end(self):
         self.timer.stop()
         self._playing = False
         self.play_btn.setText("▶ 재생")
         self.canvas.set_animated_time(self.canvas.total_time)
+        self.time_changed.emit(self.canvas.total_time)

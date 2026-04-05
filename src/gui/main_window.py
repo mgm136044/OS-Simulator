@@ -127,7 +127,8 @@ class MainWindow(QMainWindow):
             report = self.simulator.run(scheduler, processes, processors)
             reports.append(report)
 
-        self.comparison_view.set_results(reports)
+        configured_core_ids = [cid for cid, _ in core_tuples]
+        self.comparison_view.set_results(reports, configured_core_ids)
         self.comparison_view.setVisible(True)
 
     def _update_ready_queue(self, t: int | None = None):

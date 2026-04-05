@@ -1,4 +1,3 @@
-import math
 from collections import deque
 from models.process import Process
 from models.processor import Processor, CoreType

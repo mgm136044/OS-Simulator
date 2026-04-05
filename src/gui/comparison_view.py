@@ -21,7 +21,7 @@ class ComparisonView(QWidget):
             w.deleteLater()
         self._widgets.clear()
 
-    def set_results(self, reports: list[dict]):
+    def set_results(self, reports: list[dict], configured_core_ids: list[int] | None = None):
         """여러 알고리즘 결과를 한 번에 표시"""
         self.clear()
 
@@ -57,7 +57,7 @@ class ComparisonView(QWidget):
             group_layout = QVBoxLayout(group)
             canvas = GanttCanvas()
             process_ids = [p["pid"] for p in report["processes"]]
-            canvas.set_data(report["timeline"], shared_total_time, process_ids)
+            canvas.set_data(report["timeline"], shared_total_time, process_ids, configured_core_ids)
             canvas.set_animated_time(shared_total_time)
             # set_data 이후 실제 행 수 기반 높이 (코어 행 + 프로세스 행 포함)
             actual_min = canvas.minimumHeight()

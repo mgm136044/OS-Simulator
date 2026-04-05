@@ -27,7 +27,6 @@ class FCFSScheduler(BaseScheduler):
         # 각 코어가 비는 시각
         core_free_at = [0] * num_cores
         total_power = 0.0
-        total_power = 0.0
 
         for proc in sorted_procs:
             best_idx = min(range(num_cores),

@@ -32,6 +32,7 @@ class Simulator:
         avg_tt = sum(p.turnaround_time for p in processes) / n if n else 0
         avg_ntt = sum(p.ntt for p in processes) / n if n else 0
 
+        # 전력: calc_power_summary를 단일 소스로 사용 (스케줄러 내부 total_power는 참고용)
         power_summary = None
         if processors is not None:
             power_summary = calc_power_summary(processors, result.timeline, result.total_time)

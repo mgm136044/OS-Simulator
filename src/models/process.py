@@ -17,7 +17,7 @@ class Process:
 
     @property
     def ntt(self) -> float:
-        """Normalized Turnaround Time = TT / service_time (실제 서비스 시간 기준)"""
+        """Normalized Turnaround Time = TT / service_time (우선), service_time 없으면 TT / burst_time"""
         st = self.service_time if self.service_time > 0 else self.burst_time
         if st == 0:
             return 0.0

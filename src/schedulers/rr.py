@@ -41,6 +41,9 @@ class RRScheduler(BaseScheduler):
             ready_queue.append(sorted_procs[idx])
             idx += 1
 
+        # t=0 초기 큐 상태 캡처
+        queue_snapshots[0] = [p.pid for p in ready_queue]
+
         while completed < n:
             # 빈 코어에 프로세스 할당
             for ci in range(num_cores):

@@ -11,13 +11,14 @@ PROCESS_COLORS = [
 
 
 class GanttCanvas(QWidget):
-    """Gantt 차트를 그리는 캔버스"""
+    """Gantt 차트를 그리는 캔버스 — 코어별 행 표시 지원"""
 
     def __init__(self):
         super().__init__()
         self.timeline: list[TimeSlot] = []
         self.total_time = 0
         self.process_ids: list[str] = []
+        self.core_ids: list[int] = []
         self.color_map: dict[str, QColor] = {}
         self.animated_time = 0
         self.setMinimumHeight(200)
@@ -30,10 +31,14 @@ class GanttCanvas(QWidget):
         for i, pid in enumerate(self.process_ids):
             self.color_map[pid] = QColor(PROCESS_COLORS[i % len(PROCESS_COLORS)])
         self.has_idle = any(slot.pid == "idle" for slot in timeline)
+        # 코어 ID 추출
+        self.core_ids = sorted(set(slot.core_id for slot in timeline if slot.pid != "idle"))
+        if not self.core_ids:
+            self.core_ids = [0]
         self.animated_time = 0
-        # 프로세스 수에 따라 캔버스 최소 높이 동적 조정 (시간축 공간 포함)
-        total_rows = len(self.process_ids) + (1 if self.has_idle else 0)
-        self.setMinimumHeight(max(200, total_rows * 45 + 80))
+        # 캔버스 최소 높이: 코어 행 + 프로세스 행 + 시간축
+        total_rows = len(self.core_ids) + len(self.process_ids) + (1 if self.has_idle else 0)
+        self.setMinimumHeight(max(200, total_rows * 35 + 80))
         self.update()
 
     def set_animated_time(self, t: int):
@@ -48,32 +53,73 @@ class GanttCanvas(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
 
         right_margin = 20
-        w = self.width() - 90 - right_margin
         left_margin = 90
+        w = self.width() - left_margin - right_margin
         top_margin = 10
-        total_rows = len(self.process_ids) + (1 if self.has_idle else 0)
-        row_height = max(28, min(50, (self.height() - top_margin - 40) // max(total_rows, 1)))
+        num_core_rows = len(self.core_ids)
+        num_proc_rows = len(self.process_ids) + (1 if self.has_idle else 0)
+        total_visual_rows = num_core_rows + 1 + num_proc_rows  # +1 for separator
+        row_height = max(24, min(40, (self.height() - top_margin - 40) // max(total_visual_rows, 1)))
         unit_width = w / self.total_time
 
         font = QFont("Segoe UI", 10)
+        small_font = QFont("Segoe UI", 7)
         painter.setFont(font)
 
-        # 프로세스 행 라벨
+        # === 코어별 Gantt (상단) ===
+        for ci, core_id in enumerate(self.core_ids):
+            y_row = top_margin + ci * row_height
+            label = f"Core {core_id}"
+            painter.setPen(QColor("#89b4fa"))
+            painter.drawText(QRectF(0, y_row, left_margin - 10, row_height),
+                             Qt.AlignVCenter | Qt.AlignRight, label)
+
+            # 이 코어의 슬롯만 그리기
+            for slot in self.timeline:
+                if slot.core_id != core_id or slot.start >= self.animated_time:
+                    continue
+                visible_end = min(slot.end, self.animated_time)
+                x = left_margin + slot.start * unit_width
+                bar_w = (visible_end - slot.start) * unit_width
+
+                if slot.pid == "idle":
+                    painter.setBrush(QColor("#45475a"))
+                    painter.setPen(QPen(QColor("#6c7086"), 1, Qt.DashLine))
+                    painter.drawRoundedRect(QRectF(x, y_row + 3, bar_w, row_height - 6), 3, 3)
+                    painter.setFont(font)
+                else:
+                    color = self.color_map.get(slot.pid, QColor("#89b4fa"))
+                    painter.setBrush(color)
+                    painter.setPen(QPen(color.darker(120), 1))
+                    painter.drawRoundedRect(QRectF(x, y_row + 3, bar_w, row_height - 6), 3, 3)
+                    if bar_w > 15:
+                        painter.setPen(QColor("#1e1e2e"))
+                        painter.setFont(small_font)
+                        painter.drawText(QRectF(x + 1, y_row + 3, bar_w - 2, row_height - 6),
+                                         Qt.AlignCenter, slot.pid)
+                        painter.setFont(font)
+
+        # === 구분선 ===
+        sep_y = top_margin + num_core_rows * row_height + row_height // 2
+        painter.setPen(QPen(QColor("#45475a"), 1, Qt.DashLine))
+        painter.drawLine(int(left_margin), int(sep_y), int(self.width() - right_margin), int(sep_y))
+
+        # === 프로세스별 Gantt (하단) ===
+        proc_offset = top_margin + (num_core_rows + 1) * row_height
+
         for i, pid in enumerate(self.process_ids):
-            y = top_margin + i * row_height
+            y_row = proc_offset + i * row_height
             painter.setPen(QColor("#cdd6f4"))
-            painter.drawText(QRectF(0, y, left_margin - 10, row_height),
+            painter.drawText(QRectF(0, y_row, left_margin - 10, row_height),
                              Qt.AlignVCenter | Qt.AlignRight, pid)
 
-        # idle 행
         idle_row = len(self.process_ids) if self.has_idle else -1
         if self.has_idle:
-            y = top_margin + idle_row * row_height
+            y_row = proc_offset + idle_row * row_height
             painter.setPen(QColor("#6c7086"))
-            painter.drawText(QRectF(0, y, left_margin - 10, row_height),
+            painter.drawText(QRectF(0, y_row, left_margin - 10, row_height),
                              Qt.AlignVCenter | Qt.AlignRight, "idle")
 
-        # 타임라인 바
         for slot in self.timeline:
             if slot.start >= self.animated_time:
                 continue
@@ -82,20 +128,20 @@ class GanttCanvas(QWidget):
                 if not self.has_idle:
                     continue
                 row = idle_row
-                y = top_margin + row * row_height + 4
+                y = proc_offset + row * row_height + 3
                 visible_end = min(slot.end, self.animated_time)
                 x = left_margin + slot.start * unit_width
                 bar_w = (visible_end - slot.start) * unit_width
                 painter.setBrush(QColor("#45475a"))
                 painter.setPen(QPen(QColor("#6c7086"), 1, Qt.DashLine))
-                painter.drawRoundedRect(QRectF(x, y, bar_w, row_height - 8), 4, 4)
+                painter.drawRoundedRect(QRectF(x, y, bar_w, row_height - 6), 3, 3)
                 continue
 
             if slot.pid not in self.color_map:
                 continue
 
             row = self.process_ids.index(slot.pid)
-            y = top_margin + row * row_height + 4
+            y = proc_offset + row * row_height + 3
             visible_end = min(slot.end, self.animated_time)
             x = left_margin + slot.start * unit_width
             bar_w = (visible_end - slot.start) * unit_width
@@ -103,23 +149,19 @@ class GanttCanvas(QWidget):
             color = self.color_map[slot.pid]
             painter.setBrush(color)
             painter.setPen(QPen(color.darker(120), 1))
-            painter.drawRoundedRect(QRectF(x, y, bar_w, row_height - 8), 4, 4)
+            painter.drawRoundedRect(QRectF(x, y, bar_w, row_height - 6), 3, 3)
 
             if bar_w > 15:
                 painter.setPen(QColor("#1e1e2e"))
-                small_font = QFont("Segoe UI", 7)
                 painter.setFont(small_font)
-                label = f"{slot.start}-{visible_end}"
-                painter.drawText(QRectF(x + 1, y, bar_w - 2, row_height - 8),
-                                 Qt.AlignCenter, label)
+                painter.drawText(QRectF(x + 1, y, bar_w - 2, row_height - 6),
+                                 Qt.AlignCenter, f"{slot.start}-{visible_end}")
                 painter.setFont(font)
 
-        # 시간 축
-        axis_y = top_margin + total_rows * row_height + 8
+        # === 시간 축 ===
+        axis_y = proc_offset + num_proc_rows * row_height + 8
         painter.setPen(QColor("#6c7086"))
-        small_font = QFont("Segoe UI", 8)
         painter.setFont(small_font)
-        # 라벨 간 최소 간격 확보 (40px)
         min_label_gap = 40
         pixels_per_unit = unit_width
         step = max(1, int(min_label_gap / max(pixels_per_unit, 1)) + 1)
@@ -128,7 +170,7 @@ class GanttCanvas(QWidget):
             x = left_margin + t * unit_width
             if x + 15 <= self.width():
                 painter.drawText(QRectF(x - 15, axis_y, 30, 20), Qt.AlignCenter, str(t))
-        # 항상 마지막 시각 표시
+        # 마지막 시각 항상 표시
         last_x = left_margin + self.total_time * unit_width
         if last_x - 15 >= 0:
             painter.drawText(QRectF(min(last_x - 15, self.width() - 30), axis_y, 30, 20),

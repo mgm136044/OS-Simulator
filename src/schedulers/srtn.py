@@ -1,4 +1,3 @@
-import math
 from models.process import Process
 from models.processor import Processor, CoreType
 from schedulers.base import BaseScheduler, ScheduleResult, TimeSlot
@@ -35,6 +34,8 @@ class SRTNScheduler(BaseScheduler):
         while idx < n and sorted_procs[idx].arrival_time <= current_time:
             ready_queue.append(sorted_procs[idx])
             idx += 1
+
+        queue_snapshots[0] = [p.pid for p in ready_queue]
 
         while completed < n:
             # 도착 처리

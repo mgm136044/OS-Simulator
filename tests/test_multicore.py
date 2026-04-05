@@ -98,3 +98,35 @@ def test_thanos_two_cores():
     assert procs[0].completion_time == 4
     assert procs[1].completion_time == 4
     assert result.total_time == 4
+
+
+def test_fcfs_p_core_wt_ntt():
+    """P core에서 WT와 NTT가 올바르게 계산되는지 검증"""
+    procs = [Process("P1", arrival_time=0, burst_time=6)]
+    cores = [Processor(0, CoreType.P_CORE)]
+    FCFSScheduler().schedule(procs, cores)
+
+    # P core: BT=6, service_time=ceil(6/2)=3, TT=3, WT=3-3=0, NTT=3/3=1.0
+    assert procs[0].service_time == 3
+    assert procs[0].turnaround_time == 3
+    assert procs[0].waiting_time == 0   # 이전에는 3-6=-3이었음
+    assert procs[0].ntt == 1.0          # 이전에는 3/6=0.5였음
+
+
+def test_rr_p_core_wt():
+    """RR + P core에서 WT가 음수가 되지 않는지 검증"""
+    procs = [
+        Process("P1", arrival_time=0, burst_time=6),
+        Process("P2", arrival_time=0, burst_time=4),
+    ]
+    cores = [Processor(0, CoreType.P_CORE)]
+    result = RRScheduler(time_quantum=2).schedule(procs, cores)
+
+    # P core에서 work_per_tick=2이므로:
+    # t=0-2: P1 runs, remaining=6-4=2. quantum done.
+    # t=2-4: P2 runs, remaining=4-4=0. Done. CT=4, TT=4, service=2, WT=2
+    # t=4-5: P1 runs, remaining=2-2=0. Done. CT=5, TT=5, service=3, WT=2
+    assert procs[0].waiting_time >= 0  # WT가 음수가 아님
+    assert procs[1].waiting_time >= 0
+    assert procs[0].ntt >= 1.0         # NTT가 1 이상
+    assert result.total_time == 5      # P1(0-2), P2(2-4 done), P1(4-5 done)

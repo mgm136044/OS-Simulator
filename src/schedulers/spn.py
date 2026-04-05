@@ -61,9 +61,16 @@ class SPNScheduler(BaseScheduler):
 
             timeline.append(TimeSlot(proc.pid, start, end, core.core_id))
 
-            # 대기 중인 프로세스 snapshot (선택된 프로세스 제외)
+            # 대기 중인 프로세스 snapshot
             waiting = [p.pid for p in available if p.pid != proc.pid]
             queue_snapshots[start] = waiting
+            # 실행 중 도착하는 프로세스도 snapshot
+            for rp in remaining:
+                if rp.pid not in completed and start < rp.arrival_time <= end:
+                    at = rp.arrival_time
+                    waiting_at = [p.pid for p in remaining
+                                  if p.pid not in completed and p.pid != proc.pid and p.arrival_time <= at]
+                    queue_snapshots[at] = waiting_at
 
             has_idle_gap = core_free_at[best_idx] < start or core_free_at[best_idx] == 0
             if has_idle_gap:
@@ -73,7 +80,8 @@ class SPNScheduler(BaseScheduler):
             core_free_at[best_idx] = end
             proc.completion_time = end
             proc.turnaround_time = end - proc.arrival_time
-            proc.waiting_time = start - proc.arrival_time
+            proc.service_time = exec_ticks
+            proc.waiting_time = proc.turnaround_time - proc.service_time
             proc.remaining_time = 0
             completed.add(proc.pid)
 

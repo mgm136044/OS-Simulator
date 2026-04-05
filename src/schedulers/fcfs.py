@@ -43,8 +43,17 @@ class FCFSScheduler(BaseScheduler):
 
             # 대기 중인 프로세스 snapshot (현재 프로세스 제외)
             remaining_procs.remove(proc)
+            # 할당 시점 snapshot
             waiting = [p.pid for p in remaining_procs if p.arrival_time <= start]
             queue_snapshots[start] = waiting
+            # 실행 중 도착하는 프로세스도 각 도착 시점마다 snapshot
+            for rp in remaining_procs:
+                if start < rp.arrival_time <= end:
+                    arrived_at = rp.arrival_time
+                    if arrived_at not in queue_snapshots:
+                        queue_snapshots[arrived_at] = []
+                    waiting_at = [p.pid for p in remaining_procs if p.arrival_time <= arrived_at and p.pid != proc.pid]
+                    queue_snapshots[arrived_at] = waiting_at
 
             # 전력: idle gap이 있으면 시동전력 발생
             has_idle_gap = core_free_at[best_idx] < start or core_free_at[best_idx] == 0
@@ -55,7 +64,8 @@ class FCFSScheduler(BaseScheduler):
             core_free_at[best_idx] = end
             proc.completion_time = end
             proc.turnaround_time = end - proc.arrival_time
-            proc.waiting_time = start - proc.arrival_time
+            proc.service_time = exec_ticks
+            proc.waiting_time = proc.turnaround_time - proc.service_time
             proc.remaining_time = 0
 
         total_time = max(core_free_at) if core_free_at else 0

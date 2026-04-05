@@ -72,6 +72,7 @@ class RRScheduler(BaseScheduler):
                 core = processors[ci]
                 work = min(core.work_per_tick, proc.remaining_time)
                 proc.remaining_time -= work
+                proc.service_time += 1  # 실제 CPU 점유 tick 누적
                 state["quantum_used"] += 1
                 power = core.tick()
                 total_power += power
@@ -94,7 +95,7 @@ class RRScheduler(BaseScheduler):
                     proc.remaining_time = 0
                     proc.completion_time = current_time
                     proc.turnaround_time = current_time - proc.arrival_time
-                    proc.waiting_time = proc.turnaround_time - proc.burst_time
+                    proc.waiting_time = proc.turnaround_time - proc.service_time
                     timeline.append(TimeSlot(proc.pid, state["started_at"], current_time, processors[ci].core_id))
                     processors[ci].release()
                     core_state[ci] = None

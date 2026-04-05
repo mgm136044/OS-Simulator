@@ -31,9 +31,9 @@ class GanttCanvas(QWidget):
             self.color_map[pid] = QColor(PROCESS_COLORS[i % len(PROCESS_COLORS)])
         self.has_idle = any(slot.pid == "idle" for slot in timeline)
         self.animated_time = 0
-        # 프로세스 수에 따라 캔버스 최소 높이 동적 조정
+        # 프로세스 수에 따라 캔버스 최소 높이 동적 조정 (시간축 공간 포함)
         total_rows = len(self.process_ids) + (1 if self.has_idle else 0)
-        self.setMinimumHeight(max(200, total_rows * 40 + 50))
+        self.setMinimumHeight(max(200, total_rows * 45 + 80))
         self.update()
 
     def set_animated_time(self, t: int):
@@ -47,10 +47,12 @@ class GanttCanvas(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        w = self.width() - 100
+        right_margin = 20
+        w = self.width() - 90 - right_margin
         left_margin = 90
         top_margin = 10
-        row_height = max(30, min(50, (self.height() - top_margin - 30) // max(len(self.process_ids), 1)))
+        total_rows = len(self.process_ids) + (1 if self.has_idle else 0)
+        row_height = max(28, min(50, (self.height() - top_margin - 40) // max(total_rows, 1)))
         unit_width = w / self.total_time
 
         font = QFont("Segoe UI", 10)
@@ -103,17 +105,17 @@ class GanttCanvas(QWidget):
             painter.setPen(QPen(color.darker(120), 1))
             painter.drawRoundedRect(QRectF(x, y, bar_w, row_height - 8), 4, 4)
 
-            if bar_w > 20:
+            if bar_w > 15:
                 painter.setPen(QColor("#1e1e2e"))
-                small_font = QFont("Segoe UI", 8)
+                small_font = QFont("Segoe UI", 7)
                 painter.setFont(small_font)
-                painter.drawText(QRectF(x, y, bar_w, row_height - 8),
-                                 Qt.AlignCenter, f"{slot.start}-{visible_end}")
+                label = f"{slot.start}-{visible_end}"
+                painter.drawText(QRectF(x + 1, y, bar_w - 2, row_height - 8),
+                                 Qt.AlignCenter, label)
                 painter.setFont(font)
 
         # 시간 축
-        total_rows = len(self.process_ids) + (1 if self.has_idle else 0)
-        axis_y = top_margin + total_rows * row_height + 4
+        axis_y = top_margin + total_rows * row_height + 8
         painter.setPen(QColor("#6c7086"))
         small_font = QFont("Segoe UI", 8)
         painter.setFont(small_font)
@@ -124,7 +126,13 @@ class GanttCanvas(QWidget):
         step = max(1, min(step, self.total_time // 2)) if self.total_time > 0 else 1
         for t in range(0, self.total_time + 1, step):
             x = left_margin + t * unit_width
-            painter.drawText(QRectF(x - 15, axis_y, 30, 16), Qt.AlignCenter, str(t))
+            if x + 15 <= self.width():
+                painter.drawText(QRectF(x - 15, axis_y, 30, 20), Qt.AlignCenter, str(t))
+        # 항상 마지막 시각 표시
+        last_x = left_margin + self.total_time * unit_width
+        if last_x - 15 >= 0:
+            painter.drawText(QRectF(min(last_x - 15, self.width() - 30), axis_y, 30, 20),
+                             Qt.AlignCenter, str(self.total_time))
 
         painter.end()
 

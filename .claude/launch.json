@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "OS Simulator (PyQt5 App)",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["src/main.py"],
+      "port": null
+    }
+  ]
+}

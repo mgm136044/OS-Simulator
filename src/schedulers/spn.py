@@ -25,6 +25,7 @@ class SPNScheduler(BaseScheduler):
         core_free_at = [0] * num_cores
         completed: set[str] = set()
         total_power = 0.0
+        queue_snapshots: dict = {}
 
         while len(completed) < len(processes):
             # 가장 먼저 비는 코어 시각
@@ -60,6 +61,10 @@ class SPNScheduler(BaseScheduler):
 
             timeline.append(TimeSlot(proc.pid, start, end, core.core_id))
 
+            # 대기 중인 프로세스 snapshot (선택된 프로세스 제외)
+            waiting = [p.pid for p in available if p.pid != proc.pid]
+            queue_snapshots[start] = waiting
+
             has_idle_gap = core_free_at[best_idx] < start or core_free_at[best_idx] == 0
             if has_idle_gap:
                 total_power += core.startup_power
@@ -75,4 +80,5 @@ class SPNScheduler(BaseScheduler):
         total_time = max(core_free_at) if core_free_at else 0
         timeline.sort(key=lambda s: (s.core_id, s.start))
 
-        return ScheduleResult(timeline=timeline, total_time=total_time, total_power=round(total_power, 2))
+        return ScheduleResult(timeline=timeline, total_time=total_time,
+                              total_power=round(total_power, 2), queue_snapshots=queue_snapshots)

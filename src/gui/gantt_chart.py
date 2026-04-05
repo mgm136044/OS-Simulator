@@ -31,6 +31,9 @@ class GanttCanvas(QWidget):
             self.color_map[pid] = QColor(PROCESS_COLORS[i % len(PROCESS_COLORS)])
         self.has_idle = any(slot.pid == "idle" for slot in timeline)
         self.animated_time = 0
+        # 프로세스 수에 따라 캔버스 최소 높이 동적 조정
+        total_rows = len(self.process_ids) + (1 if self.has_idle else 0)
+        self.setMinimumHeight(max(200, total_rows * 40 + 50))
         self.update()
 
     def set_animated_time(self, t: int):
@@ -44,8 +47,8 @@ class GanttCanvas(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        w = self.width() - 80
-        left_margin = 70
+        w = self.width() - 100
+        left_margin = 90
         top_margin = 10
         row_height = max(30, min(50, (self.height() - top_margin - 30) // max(len(self.process_ids), 1)))
         unit_width = w / self.total_time
@@ -114,10 +117,14 @@ class GanttCanvas(QWidget):
         painter.setPen(QColor("#6c7086"))
         small_font = QFont("Segoe UI", 8)
         painter.setFont(small_font)
-        step = max(1, self.total_time // 20)
+        # 라벨 간 최소 간격 확보 (40px)
+        min_label_gap = 40
+        pixels_per_unit = unit_width
+        step = max(1, int(min_label_gap / max(pixels_per_unit, 1)) + 1)
+        step = max(1, min(step, self.total_time // 2)) if self.total_time > 0 else 1
         for t in range(0, self.total_time + 1, step):
             x = left_margin + t * unit_width
-            painter.drawText(QRectF(x - 10, axis_y, 20, 16), Qt.AlignCenter, str(t))
+            painter.drawText(QRectF(x - 15, axis_y, 30, 16), Qt.AlignCenter, str(t))
 
         painter.end()
 

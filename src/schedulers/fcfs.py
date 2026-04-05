@@ -27,6 +27,8 @@ class FCFSScheduler(BaseScheduler):
         # 각 코어가 비는 시각
         core_free_at = [0] * num_cores
         total_power = 0.0
+        queue_snapshots: dict = {}
+        remaining_procs = list(sorted_procs)
 
         for proc in sorted_procs:
             # 가장 먼저 비는 코어 (동률이면 core_id 낮은 것)
@@ -38,6 +40,11 @@ class FCFSScheduler(BaseScheduler):
             end = start + exec_ticks
 
             timeline.append(TimeSlot(proc.pid, start, end, core.core_id))
+
+            # 대기 중인 프로세스 snapshot (현재 프로세스 제외)
+            remaining_procs.remove(proc)
+            waiting = [p.pid for p in remaining_procs if p.arrival_time <= start]
+            queue_snapshots[start] = waiting
 
             # 전력: idle gap이 있으면 시동전력 발생
             has_idle_gap = core_free_at[best_idx] < start or core_free_at[best_idx] == 0
@@ -54,4 +61,5 @@ class FCFSScheduler(BaseScheduler):
         total_time = max(core_free_at) if core_free_at else 0
         timeline.sort(key=lambda s: (s.core_id, s.start))
 
-        return ScheduleResult(timeline=timeline, total_time=total_time, total_power=round(total_power, 2))
+        return ScheduleResult(timeline=timeline, total_time=total_time,
+                              total_power=round(total_power, 2), queue_snapshots=queue_snapshots)

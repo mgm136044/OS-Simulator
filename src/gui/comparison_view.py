@@ -56,8 +56,9 @@ class ComparisonView(QWidget):
             group = QGroupBox(f"{report['algorithm']}  (makespan: {report['total_time']})")
             group_layout = QVBoxLayout(group)
             canvas = GanttCanvas()
-            canvas.setMinimumHeight(120)
-            canvas.setMaximumHeight(160)
+            num_rows = len(process_ids) + 1
+            canvas.setMinimumHeight(max(140, num_rows * 30 + 30))
+            canvas.setMaximumHeight(max(180, num_rows * 40 + 30))
             process_ids = [p["pid"] for p in report["processes"]]
             canvas.set_data(report["timeline"], shared_total_time, process_ids)
             canvas.set_animated_time(shared_total_time)

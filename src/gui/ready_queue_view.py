@@ -10,7 +10,7 @@ class ReadyQueueView(QWidget):
         super().__init__()
         self.queue_pids: list[str] = []
         self.color_map: dict[str, QColor] = {}
-        self.setFixedHeight(50)
+        self.setMinimumHeight(50)
         self.setMinimumWidth(200)
 
     def set_color_map(self, color_map: dict[str, QColor]):

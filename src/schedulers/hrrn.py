@@ -25,6 +25,7 @@ class HRRNScheduler(BaseScheduler):
         core_free_at = [0] * num_cores
         completed: set[str] = set()
         total_power = 0.0
+        queue_snapshots: dict = {}
 
         while len(completed) < len(processes):
             earliest_free = min(core_free_at)
@@ -58,6 +59,9 @@ class HRRNScheduler(BaseScheduler):
 
             timeline.append(TimeSlot(proc.pid, start, end, core.core_id))
 
+            waiting = [p.pid for p in available if p.pid != proc.pid]
+            queue_snapshots[start] = waiting
+
             has_idle_gap = core_free_at[best_idx] < start or core_free_at[best_idx] == 0
             if has_idle_gap:
                 total_power += core.startup_power
@@ -73,4 +77,5 @@ class HRRNScheduler(BaseScheduler):
         total_time = max(core_free_at) if core_free_at else 0
         timeline.sort(key=lambda s: (s.core_id, s.start))
 
-        return ScheduleResult(timeline=timeline, total_time=total_time, total_power=round(total_power, 2))
+        return ScheduleResult(timeline=timeline, total_time=total_time,
+                              total_power=round(total_power, 2), queue_snapshots=queue_snapshots)

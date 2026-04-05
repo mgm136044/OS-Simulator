@@ -109,7 +109,11 @@ class MainWindow(QMainWindow):
         # ReadyQueueView 연결: queue_snapshots + 색상맵
         self._queue_snapshots = report.get("queue_snapshots", {})
         self.ready_queue_view.set_color_map(self.gantt_chart.canvas.color_map)
-        # 애니메이션 tick과 연동
+        # 기존 연결 해제 후 재연결 (중복 방지)
+        try:
+            self.gantt_chart.timer.timeout.disconnect(self._update_ready_queue)
+        except TypeError:
+            pass
         self.gantt_chart.timer.timeout.connect(self._update_ready_queue)
         self._update_ready_queue()
         self.comparison_view.setVisible(False)

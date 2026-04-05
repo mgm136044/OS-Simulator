@@ -63,8 +63,9 @@ class ProcessorConfigPanel(QWidget):
             layout.addWidget(row)
 
         spec_label = QLabel(
-            "P-Core: 2배 성능, 3W, 시동 0.5W  |  E-Core: 1배 성능, 1W, 시동 0.1W"
+            "P-Core: 2배 성능, 3W, 시동 0.5W\nE-Core: 1배 성능, 1W, 시동 0.1W"
         )
+        spec_label.setWordWrap(True)
         spec_label.setStyleSheet("color: #6c7086; font-size: 11px;")
         layout.addWidget(spec_label)
 

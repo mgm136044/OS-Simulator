@@ -47,6 +47,7 @@ class ResultTable(QWidget):
 
         # 코어별 상세
         self.core_detail_label = QLabel("")
+        self.core_detail_label.setWordWrap(True)
         self.core_detail_label.setStyleSheet("font-size: 11px; padding: 4px 12px; color: #6c7086;")
         layout.addWidget(self.core_detail_label)
 

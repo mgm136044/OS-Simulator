@@ -27,11 +27,9 @@ class FCFSScheduler(BaseScheduler):
         # 각 코어가 비는 시각
         core_free_at = [0] * num_cores
         total_power = 0.0
-        queue_snapshots: dict = {}
-        remaining_procs = list(sorted_procs)
+        total_power = 0.0
 
         for proc in sorted_procs:
-            # 가장 먼저 비는 코어 (동률이면 core_id 낮은 것)
             best_idx = min(range(num_cores),
                           key=lambda i: (max(core_free_at[i], proc.arrival_time), i))
             core = processors[best_idx]
@@ -40,20 +38,6 @@ class FCFSScheduler(BaseScheduler):
             end = start + exec_ticks
 
             timeline.append(TimeSlot(proc.pid, start, end, core.core_id))
-
-            # 대기 중인 프로세스 snapshot (현재 프로세스 제외)
-            remaining_procs.remove(proc)
-            # 할당 시점 snapshot
-            waiting = [p.pid for p in remaining_procs if p.arrival_time <= start]
-            queue_snapshots[start] = waiting
-            # 실행 중 도착하는 프로세스도 각 도착 시점마다 snapshot
-            for rp in remaining_procs:
-                if start < rp.arrival_time <= end:
-                    arrived_at = rp.arrival_time
-                    if arrived_at not in queue_snapshots:
-                        queue_snapshots[arrived_at] = []
-                    waiting_at = [p.pid for p in remaining_procs if p.arrival_time <= arrived_at and p.pid != proc.pid]
-                    queue_snapshots[arrived_at] = waiting_at
 
             # 전력: idle gap이 있으면 시동전력 발생
             has_idle_gap = core_free_at[best_idx] < start or core_free_at[best_idx] == 0
@@ -70,6 +54,16 @@ class FCFSScheduler(BaseScheduler):
 
         total_time = max(core_free_at) if core_free_at else 0
         timeline.sort(key=lambda s: (s.core_id, s.start))
+
+        # queue_snapshots: 타임라인 기반 사후 재구성
+        proc_start = {slot.pid: slot.start for slot in timeline}
+        event_times = sorted({slot.start for slot in timeline} | {p.arrival_time for p in processes})
+        queue_snapshots: dict = {}
+        for t in event_times:
+            queue_snapshots[t] = [
+                p.pid for p in sorted(processes, key=lambda p: (p.arrival_time, p.pid))
+                if p.arrival_time <= t and proc_start.get(p.pid, t + 1) > t
+            ]
 
         return ScheduleResult(timeline=timeline, total_time=total_time,
                               total_power=round(total_power, 2), queue_snapshots=queue_snapshots)

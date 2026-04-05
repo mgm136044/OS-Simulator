@@ -41,6 +41,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("프로세스 스케줄링 시뮬레이터")
         self.setMinimumSize(1200, 700)
+        self.resize(1600, 860)
         self.simulator = Simulator()
 
         central = QWidget()
@@ -96,6 +97,10 @@ class MainWindow(QMainWindow):
         splitter.addWidget(right_scroll)
         splitter.setSizes([350, 850])
 
+        # ReadyQueue 초기화 + timer 연결 (1회만, __init__에서)
+        self._queue_snapshots = {}
+        self.gantt_chart.timer.timeout.connect(self._update_ready_queue)
+
     def _on_run(self, algo_name: str, quantum: int, proc_tuples: list, core_tuples: list):
         processes = [Process(pid, at, bt) for pid, at, bt in proc_tuples]
         processors = _make_processors(core_tuples)
@@ -109,12 +114,6 @@ class MainWindow(QMainWindow):
         # ReadyQueueView 연결: queue_snapshots + 색상맵
         self._queue_snapshots = report.get("queue_snapshots", {})
         self.ready_queue_view.set_color_map(self.gantt_chart.canvas.color_map)
-        # 기존 연결 해제 후 재연결 (중복 방지)
-        try:
-            self.gantt_chart.timer.timeout.disconnect(self._update_ready_queue)
-        except TypeError:
-            pass
-        self.gantt_chart.timer.timeout.connect(self._update_ready_queue)
         self._update_ready_queue()
         self.comparison_view.setVisible(False)
 

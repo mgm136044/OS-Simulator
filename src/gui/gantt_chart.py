@@ -70,6 +70,13 @@ class GanttCanvas(QWidget):
         small_font = QFont("Segoe UI", 7)
         painter.setFont(font)
 
+        # === 행 구분 가이드라인 (코어 영역) ===
+        grid_pen = QPen(QColor("#313244"), 1, Qt.SolidLine)
+        for ci in range(num_core_rows):
+            y_line = top_margin + (ci + 1) * row_height
+            painter.setPen(grid_pen)
+            painter.drawLine(int(left_margin), int(y_line), int(self.width() - right_margin), int(y_line))
+
         # === 코어별 Gantt (상단) ===
         for ci, core_id in enumerate(self.core_ids):
             y_row = top_margin + ci * row_height
@@ -110,6 +117,12 @@ class GanttCanvas(QWidget):
 
         # === 프로세스별 Gantt (하단) ===
         proc_offset = top_margin + (num_core_rows + 1) * row_height
+
+        # 행 구분 가이드라인 (프로세스 영역)
+        for pi in range(num_proc_rows):
+            y_line = proc_offset + (pi + 1) * row_height
+            painter.setPen(grid_pen)
+            painter.drawLine(int(left_margin), int(y_line), int(self.width() - right_margin), int(y_line))
 
         for i, pid in enumerate(self.process_ids):
             y_row = proc_offset + i * row_height

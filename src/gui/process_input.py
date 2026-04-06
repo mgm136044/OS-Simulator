@@ -35,11 +35,15 @@ class ProcessInputPanel(QWidget):
 
         # Time Quantum
         quantum_layout = QHBoxLayout()
-        quantum_layout.addWidget(QLabel("Time Quantum:"))
+        self.quantum_label = QLabel("Time Quantum:")
+        quantum_layout.addWidget(self.quantum_label)
         self.quantum_spin = QSpinBox()
         self.quantum_spin.setRange(1, 100)
         self.quantum_spin.setValue(2)
         quantum_layout.addWidget(self.quantum_spin)
+        self.quantum_hint = QLabel("")
+        self.quantum_hint.setStyleSheet("color: #6c7086; font-size: 11px;")
+        quantum_layout.addWidget(self.quantum_hint)
         layout.addLayout(quantum_layout)
 
         self.algo_combo.currentTextChanged.connect(self._on_algo_changed)
@@ -104,7 +108,10 @@ class ProcessInputPanel(QWidget):
         self._process_count = 0
 
     def _on_algo_changed(self, algo: str):
-        self.quantum_spin.setEnabled(algo in ("RR", "Thanos"))
+        enabled = algo in ("RR", "Thanos")
+        self.quantum_spin.setEnabled(enabled)
+        self.quantum_label.setEnabled(enabled)
+        self.quantum_hint.setText("" if enabled else "(해당 알고리즘 미사용)")
 
     def _add_process(self):
         if self.table.rowCount() >= 15:

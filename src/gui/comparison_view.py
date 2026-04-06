@@ -1,18 +1,28 @@
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox, QScrollArea,
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 from gui.gantt_chart import GanttCanvas
 
 
 class ComparisonView(QWidget):
     """여러 알고리즘 결과를 나란히 비교하는 뷰 (자체 스크롤 포함)"""
 
+    back_requested = pyqtSignal()  # 메인 화면으로 복귀 요청
+
     def __init__(self):
         super().__init__()
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
+
+        # 돌아가기 버튼
+        self.back_btn = QPushButton("←  메인으로 돌아가기")
+        self.back_btn.setStyleSheet(
+            "QPushButton { font-size: 13px; padding: 8px 16px; background-color: #585b70; }"
+        )
+        self.back_btn.clicked.connect(self.back_requested.emit)
+        outer_layout.addWidget(self.back_btn)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)

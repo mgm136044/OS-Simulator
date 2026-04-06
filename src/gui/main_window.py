@@ -91,6 +91,7 @@ class MainWindow(QMainWindow):
         # 비교 뷰 (단일 실행 위젯과 토글)
         self.comparison_view = ComparisonView()
         self.comparison_view.setVisible(False)
+        self.comparison_view.back_requested.connect(self._on_back_to_main)
         right_layout.addWidget(self.comparison_view, stretch=3)
 
         right_scroll.setWidget(right_widget)
@@ -138,6 +139,13 @@ class MainWindow(QMainWindow):
         self.ready_queue_view.setVisible(False)
         self.result_group.setVisible(False)
         self.comparison_view.setVisible(True)
+
+    def _on_back_to_main(self):
+        """비교 뷰에서 메인 화면으로 복귀"""
+        self.gantt_group.setVisible(True)
+        self.ready_queue_view.setVisible(True)
+        self.result_group.setVisible(True)
+        self.comparison_view.setVisible(False)
 
     def _update_ready_queue(self, t: int | None = None):
         """GanttChart의 현재 애니메이션 시각에 맞춰 ReadyQueueView 갱신"""

@@ -177,6 +177,12 @@ class ProcessInputPanel(QWidget):
     def _on_compare(self):
         if not self._validate():
             return
+        # 비교 모드: quantum을 일시 활성화하여 사용자에게 현재 값 표시
+        self.quantum_spin.setEnabled(True)
+        self.quantum_label.setEnabled(True)
+        self.quantum_hint.setText("(RR/Thanos에 적용됨)")
         quantum = self.quantum_spin.value()
         cores = self.processor_config.get_active_cores()
         self.compare_requested.emit(quantum, self._get_proc_tuples(), cores)
+        # 비교 후 원래 알고리즘 기반 상태로 복원
+        self._on_algo_changed(self.algo_combo.currentText())

@@ -37,9 +37,12 @@ class ComparisonView(QWidget):
         self._widgets: list[QWidget] = []
 
     def clear(self):
-        for w in self._widgets:
-            self._layout.removeWidget(w)
-            w.deleteLater()
+        # 위젯 + spacer 포함 모든 레이아웃 아이템 제거
+        while self._layout.count():
+            item = self._layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
         self._widgets.clear()
 
     def set_results(self, reports: list[dict], configured_core_ids: list[int] | None = None):

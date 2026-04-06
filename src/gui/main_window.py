@@ -71,27 +71,27 @@ class MainWindow(QMainWindow):
         right_layout.setContentsMargins(0, 0, 0, 0)
 
         # Gantt 차트
-        gantt_group = QGroupBox("Gantt 차트")
-        gantt_layout = QVBoxLayout(gantt_group)
+        self.gantt_group = QGroupBox("Gantt 차트")
+        gantt_layout = QVBoxLayout(self.gantt_group)
         self.gantt_chart = GanttChart()
         gantt_layout.addWidget(self.gantt_chart)
-        right_layout.addWidget(gantt_group, stretch=2)
+        right_layout.addWidget(self.gantt_group, stretch=2)
 
         # Ready Queue
         self.ready_queue_view = ReadyQueueView()
         right_layout.addWidget(self.ready_queue_view)
 
         # 결과 테이블
-        result_group = QGroupBox("스케줄링 결과")
-        result_layout = QVBoxLayout(result_group)
+        self.result_group = QGroupBox("스케줄링 결과")
+        result_layout = QVBoxLayout(self.result_group)
         self.result_table = ResultTable()
         result_layout.addWidget(self.result_table)
-        right_layout.addWidget(result_group, stretch=1)
+        right_layout.addWidget(self.result_group, stretch=1)
 
-        # 비교 뷰
+        # 비교 뷰 (단일 실행 위젯과 토글)
         self.comparison_view = ComparisonView()
         self.comparison_view.setVisible(False)
-        right_layout.addWidget(self.comparison_view, stretch=2)
+        right_layout.addWidget(self.comparison_view, stretch=3)
 
         right_scroll.setWidget(right_widget)
         splitter.addWidget(right_scroll)
@@ -116,6 +116,10 @@ class MainWindow(QMainWindow):
         self._queue_snapshots = report.get("queue_snapshots", {})
         self.ready_queue_view.set_color_map(self.gantt_chart.canvas.color_map)
         self._update_ready_queue()
+        # 단일 실행 모드: Gantt/ReadyQueue/결과 표시, 비교 숨김
+        self.gantt_group.setVisible(True)
+        self.ready_queue_view.setVisible(True)
+        self.result_group.setVisible(True)
         self.comparison_view.setVisible(False)
 
     def _on_compare(self, quantum: int, proc_tuples: list, core_tuples: list):
@@ -129,6 +133,10 @@ class MainWindow(QMainWindow):
 
         configured_core_ids = [cid for cid, _ in core_tuples]
         self.comparison_view.set_results(reports, configured_core_ids)
+        # 비교 모드: Gantt/ReadyQueue/결과 숨기고, 비교 뷰가 전체 공간 차지
+        self.gantt_group.setVisible(False)
+        self.ready_queue_view.setVisible(False)
+        self.result_group.setVisible(False)
         self.comparison_view.setVisible(True)
 
     def _update_ready_queue(self, t: int | None = None):

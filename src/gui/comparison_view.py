@@ -1,23 +1,34 @@
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
+    QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox, QScrollArea,
 )
 from PyQt5.QtCore import Qt
 from gui.gantt_chart import GanttCanvas
 
 
 class ComparisonView(QWidget):
-    """여러 알고리즘 결과를 나란히 비교하는 뷰"""
+    """여러 알고리즘 결과를 나란히 비교하는 뷰 (자체 스크롤 포함)"""
 
     def __init__(self):
         super().__init__()
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        outer_layout.addWidget(self.scroll)
+
+        self._content = QWidget()
+        self._layout = QVBoxLayout(self._content)
+        self._layout.setContentsMargins(4, 4, 4, 4)
+        self._layout.setSpacing(8)
+        self.scroll.setWidget(self._content)
+
         self._widgets: list[QWidget] = []
 
     def clear(self):
         for w in self._widgets:
-            self.layout.removeWidget(w)
+            self._layout.removeWidget(w)
             w.deleteLater()
         self._widgets.clear()
 
@@ -31,6 +42,7 @@ class ComparisonView(QWidget):
         summary_table = QTableWidget(len(reports), 4)
         summary_table.setHorizontalHeaderLabels(["Algorithm", "Avg WT", "Avg TT", "Avg NTT"])
         summary_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        summary_table.verticalHeader().setVisible(False)
 
         for row, report in enumerate(reports):
             m = report["metrics"]
@@ -45,9 +57,10 @@ class ComparisonView(QWidget):
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 summary_table.setItem(row, col, item)
 
-        summary_table.setMaximumHeight(40 + len(reports) * 30)
+        summary_table.setMinimumHeight(40 + len(reports) * 30)
+        summary_table.setMaximumHeight(60 + len(reports) * 32)
         summary_layout.addWidget(summary_table)
-        self.layout.addWidget(summary_group)
+        self._layout.addWidget(summary_group)
         self._widgets.append(summary_group)
 
         shared_total_time = max(r["total_time"] for r in reports)
@@ -59,10 +72,12 @@ class ComparisonView(QWidget):
             process_ids = [p["pid"] for p in report["processes"]]
             canvas.set_data(report["timeline"], shared_total_time, process_ids, configured_core_ids)
             canvas.set_animated_time(shared_total_time)
-            # set_data 이후 실제 행 수 기반 높이 (코어 행 + 프로세스 행 포함)
+            # set_data 이후 실제 행 수 기반 높이
             actual_min = canvas.minimumHeight()
-            canvas.setMinimumHeight(max(140, actual_min))
-            canvas.setMaximumHeight(max(actual_min + 40, 300))
+            canvas.setFixedHeight(max(160, actual_min))
             group_layout.addWidget(canvas)
-            self.layout.addWidget(group)
+            self._layout.addWidget(group)
             self._widgets.append(group)
+
+        # 하단 여백
+        self._layout.addStretch()

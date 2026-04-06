@@ -51,7 +51,7 @@ src/
 ├── schedulers/       ← 스케줄링 알고리즘 6개 + 공통 인터페이스
 ├── engine/           ← 시뮬레이션 엔진 + 소비전력 계산
 └── gui/              ← PyQt5 GUI 컴포넌트 (다크 테마)
-tests/                ← 42개 자동화 테스트
+tests/                ← 45개 자동화 테스트
 ```
 
 **데이터 흐름:**
@@ -83,27 +83,29 @@ GanttChart + ResultTable + ReadyQueueView (GUI 출력)
 class Process:
     pid: str                          # 프로세스 ID
     arrival_time: int                 # 도착 시간
-    burst_time: int                   # 실행 시간
+    burst_time: int                   # 실행 시간 (작업량, work units)
     remaining_time: int = field(init=False)  # 잔여 시간 (__post_init__에서 burst_time으로 초기화)
     waiting_time: int = 0             # 대기 시간
     turnaround_time: int = 0          # 반환 시간 (CT - AT)
     completion_time: int = 0          # 완료 시간
+    service_time: int = 0             # 실제 CPU 점유 시간 (ticks). P-core에서 BT와 다를 수 있음
 
     def __post_init__(self):
         self.remaining_time = self.burst_time
 
     @property
     def ntt(self) -> float:
-        """Normalized Turnaround Time = TT / BT"""
-        if self.burst_time == 0:
+        """Normalized Turnaround Time = TT / service_time (우선), service_time 없으면 TT / burst_time"""
+        st = self.service_time if self.service_time > 0 else self.burst_time
+        if st == 0:
             return 0.0
-        return self.turnaround_time / self.burst_time
+        return self.turnaround_time / st
 
     def reset(self):
-        """스케줄러 재실행 시 메트릭 초기화"""
+        """스케줄러 재실행 시 메트릭 초기화 (service_time 포함)"""
 ```
 
-`remaining_time`은 `field(init=False)`로 선언되어 생성자 파라미터가 아니며, `__post_init__`에서 `burst_time`으로 자동 초기화된다. `ntt`는 `burst_time == 0`인 경우를 방어한다.
+`remaining_time`은 `field(init=False)`로 선언되어 생성자 파라미터가 아니며, `__post_init__`에서 `burst_time`으로 자동 초기화된다. `service_time`은 실제 CPU 점유 tick 수로, P-core(work_per_tick=2)에서 `burst_time`과 다를 수 있다. `ntt`는 `service_time`을 우선 사용하여 P-core에서도 정확한 정규화 반환시간을 계산한다.
 
 `reset()` 메서드를 통해 동일한 프로세스 객체를 여러 알고리즘에서 재사용할 수 있다. 이는 전체 비교 기능에서 핵심적으로 활용된다.
 
@@ -204,6 +206,7 @@ for proc in sorted_procs:
 # 1 tick 실행
 work = min(core.work_per_tick, proc.remaining_time)
 proc.remaining_time -= work
+proc.service_time += 1  # 실제 CPU 점유 tick 누적
 state["quantum_used"] += 1
 
 # quantum 만료 시 선점
@@ -435,7 +438,7 @@ _(스크린샷 삽입 위치 — 한컴 편집 시 추가)_
 ### 5. 테스트 커버리지
 
 ```
-42 tests passed (0.02s)
+45 tests passed (0.02s)
 
 test_fcfs.py        3 tests  — FCFS 타임라인, 메트릭, 이름
 test_rr.py          3 tests  — RR 메트릭, 전체 시간, 이름
@@ -443,11 +446,11 @@ test_spn.py         3 tests  — SPN 메트릭, 타임라인, 이름
 test_srtn.py        3 tests  — SRTN 메트릭, 선점, 이름
 test_hrrn.py        3 tests  — HRRN 메트릭, 타임라인, 이름
 test_thanos.py      4 tests  — Thanos 메트릭, 부스트, 전체 시간, 이름
-test_process.py     3 tests  — Process 생성, NTT, reset
+test_process.py     4 tests  — Process 생성, NTT, reset, service_time 기반 NTT
 test_processor.py   8 tests  — P/E core 속성, 시동전력, 재배정
 test_simulator.py   3 tests  — Simulator 실행, 메트릭, 상세
 test_power.py       3 tests  — 단일/혼합 코어 전력, idle 처리
-test_multicore.py   6 tests  — 병렬 실행, P core 속도, 전력
+test_multicore.py   8 tests  — 병렬 실행, P core 속도, 전력, P-core WT/NTT 검증
 ```
 
 ---
@@ -459,7 +462,7 @@ test_multicore.py   6 tests  — 병렬 실행, P core 속도, 전력
 - 6개 스케줄링 알고리즘 구현 및 멀티코어(최대 4코어, P/E core) 지원
 - P core 2배 성능/3배 전력, E core 기본 성능/전력, 시동전력 모델 구현
 - Gantt 차트 애니메이션 + Ready Queue 시각화 + 결과 테이블 + 전체 비교 뷰
-- 다크 테마 GUI, 42개 자동화 테스트로 알고리즘 정확성 검증
+- 다크 테마 GUI, 45개 자동화 테스트로 알고리즘 정확성 검증
 - 엔진/GUI 완전 분리 아키텍처로 테스트 용이성 확보
 
 ### 2. Thanos 알고리즘의 의의

@@ -104,7 +104,7 @@ class ProcessInputPanel(QWidget):
         self._process_count = 0
 
     def _on_algo_changed(self, algo: str):
-        self.quantum_spin.setEnabled(True)
+        self.quantum_spin.setEnabled(algo in ("RR", "Thanos"))
 
     def _add_process(self):
         if self.table.rowCount() >= 15:

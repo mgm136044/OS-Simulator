@@ -5,7 +5,8 @@ from PyQt5.QtGui import QIcon
 from gui.main_window import MainWindow
 from gui.theme import DARK_STYLESHEET
 
-ICON_PATH = os.path.join(os.path.dirname(__file__), "..", "assets", "icon.png")
+_BASE = getattr(sys, '_MEIPASS', os.path.join(os.path.dirname(__file__), ".."))
+ICON_PATH = os.path.join(_BASE, "assets", "icon.png")
 
 
 def main():
